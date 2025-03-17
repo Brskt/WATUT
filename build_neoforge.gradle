@@ -1,7 +1,8 @@
 plugins {
+    id 'idea'
     id 'java-library'
     id 'maven-publish'
-    id 'net.neoforged.moddev' version '1.0.14'
+    id 'net.neoforged.moddev' version '2.0.78'
     id "com.hypherionmc.modutils.modpublisher" version "2.1.6"
 }
 
@@ -131,11 +132,12 @@ dependencies {
     // The group id is ignored when searching -- in this case, it is "blank"
     // implementation "blank:coolmod-${mc_version}:${coolmod_version}"
 
-    implementation ("com.corosus.coroutil:coroutil-neoforge:${project.minecraft_version}.0-${project.coroutil_version}")
+    implementation ("com.corosus.coroutil:coroutil-neoforge:${project.minecraft_version}-${project.coroutil_version}")
 
-    implementation ("curse.maven:jei-238222:5846880")
-    implementation ("curse.maven:xaeromm-263420:6184458")
-    implementation ("curse.maven:xaerowm-317780:6212662")
+    //implementation ("curse.maven:journeymap-32274:5950315")
+    implementation ("curse.maven:corpse-316582:5964725")
+    implementation ("curse.maven:Xaeros_Minimap-263420:6184463")
+    implementation ("curse.maven:Xaeros_WorldMap-317780:6212666")
 
     //implementation("curse.maven:forge-config-api-port-fabric-547434:5577288")
     implementation 'com.electronwill.night-config:core:3.6.5'
@@ -252,7 +254,7 @@ publisher {
     // For example: markdown.md, or "This is my changelog"
     // Or: https://raw.githubusercontent.com/hypherionmc/changelogs/changelog.md
     // Or https://gist.githubusercontent.com/hypherionmc/92f825d3c9337964cc77c9c8c9bf65e6/raw/ceeaaee5b98c688a23398864fe480b84796a1651/test_gist.md
-    setChangelog("https://raw.githubusercontent.com/Corosauce/WATUT/refs/heads/1.21.0/changelog.md")
+    setChangelog("https://raw.githubusercontent.com/Corosauce/WATUT/refs/heads/1.21.3/changelog.md")
 
     // Required for Modrinth/GitHub
     setProjectVersion("${project.version}")
@@ -262,7 +264,7 @@ publisher {
     setDisplayName("${project.mod_id}-neoforge-${project.mod_version}.jar")
 
     // The supported game versions
-    setGameVersions(["${project.minecraft_version}", "1.21.1"])
+    setGameVersions("${project.minecraft_version}")
 
     // The modloaders your upload supports.
     // This can also be an Enum from ModLoader,

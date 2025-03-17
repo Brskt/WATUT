@@ -1,1 +1,1 @@
-Workaround flickering issue that is still happening on fabric, set default to not constantly update GUI
+Update v1.2.3 to 1.21.3

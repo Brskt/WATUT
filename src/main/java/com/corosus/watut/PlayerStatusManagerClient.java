@@ -602,6 +602,7 @@ public class PlayerStatusManagerClient extends PlayerStatusManager {
         String str = "";
 
         for (Map.Entry<UUID, PlayerStatus> entry : lookupPlayerToStatus.entrySet()) {
+            if (mc.player != null && entry.getKey().equals(mc.player.getUUID())) continue;
             if (entry.getValue().getPlayerGuiState() == PlayerStatus.PlayerGuiState.CHAT_SCREEN
                     && entry.getValue().getPlayerChatState() == PlayerStatus.PlayerChatState.CHAT_TYPING) {
                 PlayerInfo info = mc.getConnection().getPlayerInfo(entry.getKey());

@@ -25,7 +25,7 @@ public class ScreenData {
                     .withLocation("pipeline/watut_translucent_particle_no_cull")
                     .withBlend(BlendFunction.TRANSLUCENT)
                     .withCull(false)
-                    .withDepthTestFunction(DepthTestFunction.NO_DEPTH_TEST)
+                    .withDepthTestFunction(DepthTestFunction.LEQUAL_DEPTH_TEST)
                     .withDepthWrite(false)
                     .build());
 

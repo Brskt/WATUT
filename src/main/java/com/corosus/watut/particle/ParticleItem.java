@@ -12,7 +12,7 @@ import net.minecraft.client.renderer.RenderBuffers;
 import net.minecraft.client.renderer.entity.EntityRenderDispatcher;
 import net.minecraft.client.renderer.item.ItemStackRenderState;
 import net.minecraft.client.renderer.texture.OverlayTexture;
-import net.minecraft.client.resources.model.BakedModel;
+import net.minecraft.client.renderer.block.model.BlockStateModel;
 import net.minecraft.util.Mth;
 import net.minecraft.world.item.ItemDisplayContext;
 import net.minecraft.world.item.ItemStack;
@@ -25,7 +25,7 @@ public class ParticleItem extends ParticleRotating {
 
     public static HashSet<String> itemBlacklist = new HashSet<>();
 
-    public BakedModel bakedModel;
+    public BlockStateModel bakedModel;
     public ItemStackRenderState scratchItemStackRenderState;
     public ItemStack itemStack;
     private final RenderBuffers renderBuffers;
@@ -57,7 +57,7 @@ public class ParticleItem extends ParticleRotating {
         scratchItemStackRenderState = new ItemStackRenderState();
         Minecraft.getInstance()
                 .getItemModelResolver()
-                .updateForTopItem(this.scratchItemStackRenderState, itemStack, ItemDisplayContext.GROUND, false, level, null, 0);
+                .updateForTopItem(this.scratchItemStackRenderState, itemStack, ItemDisplayContext.GROUND, level, null, 0);
         this.itemStack = itemStack;
         this.entityRenderDispatcher = entityRenderDispatcher;
         this.rotationYaw = pLevel.getRandom().nextFloat() * 360;
@@ -70,19 +70,19 @@ public class ParticleItem extends ParticleRotating {
     }
 
     protected float getU0() {
-        return bakedModel.getParticleIcon().getU0();
+        return bakedModel.particleIcon().getU0();
     }
 
     protected float getU1() {
-        return bakedModel.getParticleIcon().getU1();
+        return bakedModel.particleIcon().getU1();
     }
 
     protected float getV0() {
-        return bakedModel.getParticleIcon().getV0();
+        return bakedModel.particleIcon().getV0();
     }
 
     protected float getV1() {
-        return bakedModel.getParticleIcon().getV1();
+        return bakedModel.particleIcon().getV1();
     }
 
     public void setSize(float pWidth, float pHeight) {

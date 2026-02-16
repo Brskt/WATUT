@@ -1,6 +1,6 @@
 #version 150
 
-uniform sampler2D Sampler0;
+uniform sampler2D InSampler;
 
 uniform vec4 ColorModulator;
 uniform vec2 resolution;
@@ -18,8 +18,8 @@ void main() {
     float xmid = xs / 2;
     float ymid = ys / 2;
 
-    vec2 tex_offset = 1.0 / textureSize(Sampler0, 0); // size of a single texel
-    vec4 result = texture(Sampler0, texCoord0);
+    vec2 tex_offset = 1.0 / textureSize(InSampler, 0); // size of a single texel
+    vec4 result = texture(InSampler, texCoord0);
     if (blurLevel != 0) {
         result.rgb = vec3(0);
         float weights[5];
@@ -30,7 +30,7 @@ void main() {
         }
         int blurRange = 4;
         for (int i = -blurRange; i <= blurRange; ++i) {
-            result.rgb += texture(Sampler0, texCoord0 + vec2(0.0, tex_offset.y * float(i))).rgb * weights[abs(i)];
+            result.rgb += texture(InSampler, texCoord0 + vec2(0.0, tex_offset.y * float(i))).rgb * weights[abs(i)];
         }
     }
 

@@ -1,10 +1,7 @@
 package com.corosus.watut.mixin.client;
 
 import com.corosus.watut.PlayerStatusManagerClient;
-import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.client.Camera;
-import net.minecraft.client.Minecraft;
-import net.minecraft.client.renderer.LightTexture;
 import net.minecraft.client.renderer.MultiBufferSource;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -16,7 +13,7 @@ public abstract class ParticleEngineMixinFabric {
 
     @Inject(method = "render", at = @At("TAIL"))
     private void render(Camera camera, float partialTick, MultiBufferSource.BufferSource bufferSource, CallbackInfo ci) {
-        PlayerStatusManagerClient.getParticleEngine().render(Minecraft.getInstance().gameRenderer.lightTexture(), camera, partialTick);
+        PlayerStatusManagerClient.getParticleEngine().render(camera, partialTick, bufferSource);
     }
 
     @Inject(method = "tick", at = @At("TAIL"))

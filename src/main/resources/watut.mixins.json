@@ -11,9 +11,7 @@
     "client.ScreenRenderWithTooltip",
     "client.GameRendererResize",
     "client.ParticleEngineMixin",
-    "client.NativeImageAccessor",
-    "client.RenderTargetBindWrite",
-    "client.RenderStateShardSetup"
+    "client.NativeImageAccessor"
   ],
   "mixins": [
     "AbstractContainerMenuDoClick",

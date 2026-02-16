@@ -1,10 +1,12 @@
 #version 150
 
-uniform sampler2D Sampler0;
+uniform sampler2D InSampler;
 
 uniform vec4 ColorModulator;
 uniform vec2 resolution;
 uniform float radius;
+uniform vec2 InCropMin;
+uniform vec2 InCropMax;
 
 in vec2 texCoord0;
 
@@ -13,7 +15,9 @@ out vec4 fragColor;
 const float weight[5] = float[](0.227027, 0.1945946, 0.1216216, 0.054054, 0.016216);
 
 void main() {
-    vec4 color = texture(Sampler0, texCoord0);
+    // Remap texCoord0 from [0,1] to the crop region of the source texture
+    vec2 uv = mix(InCropMin, InCropMax, texCoord0);
+    vec4 color = texture(InSampler, uv);
 
     float r = radius;
     float x,y,xx,yy,rr=r*r,dx,dy,w,w0;
@@ -25,7 +29,7 @@ void main() {
     float ymid = ys / 2;
     w0=0.3780/pow(r,1.975);
     vec2 p;
-    vec2 pos = texCoord0;
+    vec2 pos = uv;
     vec4 col=vec4(0.0,0.0,0.0,0.0);
     for (dx=1.0/xs, x=-r, p.x=(pos.x)+(x*dx); x<=r; x++, p.x+=dx) {
         xx=x*x;
@@ -33,12 +37,12 @@ void main() {
             yy=y*y;
             if (xx+yy<=rr) {
                 w=w0*exp((-xx-yy)/(2.0*rr));
-                col+=texture(Sampler0,p)*w;
+                col+=texture(InSampler,p)*w;
             }
         }
     }
     if (r == 0) {
-        col=texture(Sampler0, texCoord0);
+        col=texture(InSampler, uv);
     }
     //col.a = texCoord0.y;
     int cutoff = 128;

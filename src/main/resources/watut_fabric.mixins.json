@@ -15,9 +15,7 @@
     "client.TextureAtlasUpload",
     "client.GameRendererResize",
     "client.ParticleEngineMixinFabric",
-    "client.NativeImageAccessor",
-    "client.RenderTargetBindWrite",
-    "client.RenderStateShardSetup"
+    "client.NativeImageAccessor"
   ],
   "mixins": [
     "PlayerLoggedIn",

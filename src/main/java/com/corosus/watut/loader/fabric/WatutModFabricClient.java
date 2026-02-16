@@ -29,7 +29,7 @@ public class WatutModFabricClient implements ClientModInitializer {
 			ctx.client().execute(() -> {
 				try {
 					if (nbt.contains(WatutNetworking.NBTDataPlayerUUID)) {
-						UUID uuid = UUID.fromString(nbt.getString(WatutNetworking.NBTDataPlayerUUID));
+						UUID uuid = UUID.fromString(nbt.getString(WatutNetworking.NBTDataPlayerUUID).orElse(""));
 						WatutMod.getPlayerStatusManagerClient().receiveAny(uuid, nbt);
 					} else if (nbt.contains(WatutNetworking.NBTDataServerConfig)) {
 						WatutMod.getPlayerStatusManagerClient().receiveServerConfig(nbt);

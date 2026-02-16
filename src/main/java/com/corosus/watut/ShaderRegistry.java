@@ -6,7 +6,7 @@ public class ShaderRegistry {
 
     public static void init() {
 
-        PlayerStatusManagerClient.particle = new ShaderProgramBlur("core/particle");
+        //PlayerStatusManagerClient.particle = new ShaderProgramBlur("core/particle"); // Unused in 1.21.5 - particle rendering uses vanilla RenderType now
         PlayerStatusManagerClient.positionTexBlur = new ShaderProgramBlur("core/position_tex_blur");
         PlayerStatusManagerClient.positionTexBlurHorizontal = new ShaderProgramBlur("core/position_tex_blur_horizontal");
         PlayerStatusManagerClient.positionTexBlurVertical = new ShaderProgramBlur("core/position_tex_blur_vertical");
@@ -14,10 +14,8 @@ public class ShaderRegistry {
     }
 
     public static void reloadShaders() {
-        PlayerStatusManagerClient.particle.markUniformsNeedUpdate();
-        PlayerStatusManagerClient.positionTexBlur.markUniformsNeedUpdate();
-        PlayerStatusManagerClient.positionTexBlurHorizontal.markUniformsNeedUpdate();
-        PlayerStatusManagerClient.positionTexBlurVertical.markUniformsNeedUpdate();
+        // In 1.21.5, RenderPipeline manages shader compilation internally
+        // No uniform cache to invalidate
     }
 
 }

@@ -48,25 +48,25 @@ public class PlayerStatusManagerServer extends PlayerStatusManager {
         data.putString(WatutNetworking.NBTDataPlayerUUID, player.getUUID().toString());
 
         if (data.contains(WatutNetworking.NBTDataPlayerGuiStatus)) {
-            PlayerStatus.PlayerGuiState playerGuiState = PlayerStatus.PlayerGuiState.get(data.getInt(WatutNetworking.NBTDataPlayerGuiStatus));
+            PlayerStatus.PlayerGuiState playerGuiState = PlayerStatus.PlayerGuiState.get(data.getInt(WatutNetworking.NBTDataPlayerGuiStatus).orElse(0));
             getStatus(player).setPlayerGuiState(playerGuiState);
         }
 
         if (data.contains(WatutNetworking.NBTDataPlayerChatStatus)) {
-            PlayerStatus.PlayerChatState state = PlayerStatus.PlayerChatState.get(data.getInt(WatutNetworking.NBTDataPlayerChatStatus));
+            PlayerStatus.PlayerChatState state = PlayerStatus.PlayerChatState.get(data.getInt(WatutNetworking.NBTDataPlayerChatStatus).orElse(0));
             getStatus(player).setPlayerChatState(state);
         }
 
         if (data.contains(WatutNetworking.NBTDataPlayerIdleTicks)) {
-            handleIdleState(player, data.getInt(WatutNetworking.NBTDataPlayerIdleTicks));
+            handleIdleState(player, data.getInt(WatutNetworking.NBTDataPlayerIdleTicks).orElse(0));
             //send latest config setting for ticks to go idle
             data.putInt(WatutNetworking.NBTDataPlayerTicksToGoIdle, ConfigCommon.ticksToMarkPlayerIdle);
         }
 
         if (data.contains(WatutNetworking.NBTDataPlayerMouseX)) {
-            float x = data.getFloat(WatutNetworking.NBTDataPlayerMouseX);
-            float y = data.getFloat(WatutNetworking.NBTDataPlayerMouseY);
-            boolean pressed = data.getBoolean(WatutNetworking.NBTDataPlayerMousePressed);
+            float x = data.getFloat(WatutNetworking.NBTDataPlayerMouseX).orElse(0f);
+            float y = data.getFloat(WatutNetworking.NBTDataPlayerMouseY).orElse(0f);
+            boolean pressed = data.getBoolean(WatutNetworking.NBTDataPlayerMousePressed).orElse(false);
             setMouse(player.getUUID(), x, y, pressed);
         }
 
@@ -115,7 +115,7 @@ public class PlayerStatusManagerServer extends PlayerStatusManager {
         WatutMod.dbg("player logged in " + player.getName());
         if (player instanceof ServerPlayer) {
             for (Map.Entry<UUID, PlayerStatus> entry : lookupPlayerToStatus.entrySet()) {
-                WatutMod.dbg("sending update all packet for " + entry.getKey().toString() + " to " + player.getDisplayName().getString() + " with status " + PlayerStatus.PlayerGuiState.get(entry.getValue().getNbtCache().getInt(WatutNetworking.NBTDataPlayerGuiStatus)));
+                WatutMod.dbg("sending update all packet for " + entry.getKey().toString() + " to " + player.getDisplayName().getString() + " with status " + PlayerStatus.PlayerGuiState.get(entry.getValue().getNbtCache().getInt(WatutNetworking.NBTDataPlayerGuiStatus).orElse(0)));
                 WatutNetworking.instance().serverSendToClientPlayer(entry.getValue().getNbtCache(), player);
             }
 
@@ -177,7 +177,7 @@ public class PlayerStatusManagerServer extends PlayerStatusManager {
         playerStatus.getInventorySnapshotPlayer().itemStackList.clear();
         playerStatus.getInventorySnapshotContainer().itemStackList.clear();
         playerStatus.getInventorySnapshotCarried().itemStackList.clear();
-        for (ItemStack item : player.getInventory().items) {
+        for (ItemStack item : player.getInventory().getNonEquipmentItems()) {
             playerStatus.getInventorySnapshotPlayer().itemStackList.add(item.copy());
         }
         for (Slot slot : abstractContainerMenu.slots) {
@@ -227,7 +227,7 @@ public class PlayerStatusManagerServer extends PlayerStatusManager {
         InventorySnapshot inventorySnapshotPlayerPost = new InventorySnapshot();
         InventorySnapshot inventorySnapshotContainerPost = new InventorySnapshot();
         InventorySnapshot inventorySnapshotCarriedPost = new InventorySnapshot();
-        for (ItemStack item : player.getInventory().items) {
+        for (ItemStack item : player.getInventory().getNonEquipmentItems()) {
             inventorySnapshotPlayerPost.itemStackList.add(item.copy());
         }
         for (Slot slot : abstractContainerMenu.slots) {

@@ -9,8 +9,12 @@ import com.corosus.watut.config.ConfigClient;
 import com.corosus.watut.config.ConfigServerControlledSyncedToClient;
 import com.corosus.watut.mixin.client.NativeImageAccessor;
 import com.mojang.blaze3d.ProjectionType;
+import com.mojang.blaze3d.buffers.BufferType;
+import com.mojang.blaze3d.buffers.BufferUsage;
+import com.mojang.blaze3d.buffers.GpuBuffer;
 import com.mojang.blaze3d.platform.Window;
 import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.blaze3d.textures.GpuTexture;
 import com.mojang.blaze3d.vertex.VertexSorting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -18,7 +22,6 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.renderer.texture.DynamicTexture;
 import net.minecraft.resources.ResourceLocation;
 import org.joml.Matrix4f;
-import org.lwjgl.opengl.GL11;
 import org.lwjgl.system.MemoryUtil;
 
 import java.io.ByteArrayInputStream;
@@ -218,13 +221,16 @@ public class RenderHelper {
                 }
 
                 if (screenData.getImage() == null) {
-                    screenData.setImage(new DynamicTexture(screenData.getWidth(), screenData.getHeight(), true));
+                    screenData.setImage(new DynamicTexture("watut_screen", screenData.getWidth(), screenData.getHeight(), true));
+                    screenData.registerTexture();
                 } else {
                     //detect a resolution change and remake buffer, only used if experimental rendering of entire screen config is on
                     //CULog.dbg("screendata sizes " + screenData.getWidth() + " " + screenData.getHeight());
                     if (screenData.getImage().getPixels().getWidth() != screenData.getWidth() || screenData.getImage().getPixels().getHeight() != screenData.getHeight()) {
                         screenData.closeImage();
-                        screenData.setImage(new DynamicTexture(screenData.getWidth(), screenData.getHeight(), true));
+                        screenData.setImage(new DynamicTexture("watut_screen", screenData.getWidth(), screenData.getHeight(), true));
+                        screenData.invalidateCachedRenderType();
+                        screenData.registerTexture();
                         CULog.dbg("screendata image resized to " + screenData.getWidth() + " " + screenData.getHeight());
                     }
                 }
@@ -248,11 +254,13 @@ public class RenderHelper {
         Matrix4f matrix4f = (new Matrix4f()).setOrtho(0.0F, (float)((double)window.getWidth() / window.getGuiScale()), (float)((double)window.getHeight() / window.getGuiScale()), 0.0F, 1000.0F, WatutMod.instance().getFarPlane());
         RenderSystem.setProjectionMatrix(matrix4f, ProjectionType.ORTHOGRAPHIC);
 
-        Minecraft.getInstance().getMainRenderTarget().bindWrite(true);
+        // In 1.21.5, bindWrite() is no longer available on RenderTarget
+        // The main render target is implicitly the render destination
     }
 
     public static void unbindVanillaRenderTarget() {
-        Minecraft.getInstance().getMainRenderTarget().unbindWrite();
+        // In 1.21.5, unbindWrite() is no longer available on RenderTarget
+        // No-op
     }
 
     public static boolean useDynamicGUISystem() {
@@ -287,18 +295,13 @@ public class RenderHelper {
 
 
         if (needsScreenUpdate && !processor.hasWork()) {
-
             playerStatusLocal.getScreenData().setNeedsNewRenderToPixelData(false);
             ScreenParticleRenderer.getInstance().checkSetup();
-            unbindVanillaRenderTarget();
+
             ScreenParticleRenderer.getInstance().bind();
 
-            RenderSystem.clear(16640);
-
             if (Minecraft.getInstance().screen != null) {
-                //TODO: isRenderingParticleGUI2 cant be conditional now with the render target binding redirect mixin
                 if (ConfigServerControlledSyncedToClient.dynamicGuiDisableBackgroundRendering) {
-                    //ScreenParticleRenderer.isRenderingParticleGUI = true;
                     ScreenParticleRenderer.isRenderingParticleGUI2 = true;
                 }
                 performingOwnRender = true;
@@ -317,34 +320,23 @@ public class RenderHelper {
                     } catch (IllegalAccessException e) {
                         e.printStackTrace();
                     }
-                } else {
-                    Minecraft.getInstance().screen.renderWithTooltip(pGuiGraphics, pMouseX, pMouseY, pPartialTick);
                 }
+                Minecraft.getInstance().screen.renderWithTooltip(pGuiGraphics, pMouseX, pMouseY, pPartialTick);
 
-                //render our cursor
-                ScreenParticleRenderer.getInstance().innerBlit(pGuiGraphics.pose(), cursor, pMouseX, pMouseX + 6, pMouseY, pMouseY + 10, 100, 0, 1, 0, 1);
+                // Flush the BufferSource BEFORE unbinding so draws go to the custom target
+                pGuiGraphics.flush();
 
                 performingOwnRender = false;
                 ScreenParticleRenderer.isRenderingParticleGUI = false;
                 ScreenParticleRenderer.isRenderingParticleGUI2 = false;
             }
 
+            ScreenParticleRenderer.getInstance().unbind();
+
             //if (true) return;
 
             //readPixelsTest();
             ByteBuffer pixelBuffer;
-            //pixelBuffer = getPixelDataFromFrameBuffer();
-
-            ScreenParticleRenderer.getInstance().unbind();
-
-            Matrix4f matrix4f = (new Matrix4f()).setOrtho(0.0F, (float)ScreenParticleRenderer.getInstance().widthScaledDown, (float)ScreenParticleRenderer.getInstance().heightScaledDown, 0.0F, 1000.0F, 21000.0F/*net.minecraftforge.client.ForgeHooksClient.getGuiFarPlane()*/);
-            RenderSystem.setProjectionMatrix(matrix4f, ProjectionType.ORTHOGRAPHIC);
-
-            ScreenParticleRenderer.getInstance().bindScaledDown();
-
-            //ScreenParticleRenderer.isRenderingParticleGUI2 = true;
-
-            RenderSystem.clear(16640);
 
             double guiScale = Minecraft.getInstance().getWindow().getGuiScale();
             if (ConfigServerControlledSyncedToClient.dynamicGuiShowClientsEntireScreen) {
@@ -371,30 +363,24 @@ public class RenderHelper {
 
             boolean test = false;
             if (test) {
-                ScreenParticleRenderer.getInstance().innerBlit(pGuiGraphics.pose(), cursor, pMouseX, pMouseX + 6, pMouseY, pMouseY + 10, 100, 0, 1, 0, 1);
+                //no-op: cursor rendering not yet ported to 1.21.5
             } else {
                 boolean useBlur = true;
                 if (useBlur) {
-                    ScreenParticleRenderer.getInstance().innerBlitCustomShaderHorizontal(pGuiGraphics.pose()
-                            , x1, x2
+                    ScreenParticleRenderer.getInstance().innerBlitCustomShaderHorizontal(
+                            x1, x2
                             , y1, y2
                             , 0
                             , minU, maxU, minV, maxV);
 
-                /*ScreenParticleRenderer.getInstance().innerBlitCustomShaderVertical(pGuiGraphics.pose()
-                        , x1, x2
-                        , y1, y2
-                        , 0
-                        , minU, maxU, minV, maxV);*/
-
-                    ScreenParticleRenderer.getInstance().innerBlitCustomShaderVertical(pGuiGraphics.pose()
-                            , 0, ScreenParticleRenderer.getInstance().widthScaledDown
+                    ScreenParticleRenderer.getInstance().innerBlitCustomShaderVertical(
+                            0, ScreenParticleRenderer.getInstance().widthScaledDown
                             , 0, ScreenParticleRenderer.getInstance().heightScaledDown
                             , 0
                             , 0, 1, 0, 1);
                 } else {
-                    ScreenParticleRenderer.getInstance().innerBlitCustomShader(pGuiGraphics.pose()
-                            , x1, x2
+                    ScreenParticleRenderer.getInstance().innerBlitCustomShader(
+                            x1, x2
                             , y1, y2
                             , 0
                             , minU, maxU, minV, maxV);
@@ -404,14 +390,8 @@ public class RenderHelper {
 
             //if (true) return;
 
-            //TEST
-            //bindVanillaRenderTargetAndSetupProjectionMatrix();
-            //readPixelsTest();
-
             //getting data from scaled down framebuffer
-            //ByteBuffer pixelBuffer = getPixelDataFromFrameBuffer();
             pixelBuffer = getPixelDataFromFrameBuffer();
-            //readPixelsTest();
 
             boolean useThread = true;
             if (useThread) {
@@ -421,8 +401,6 @@ public class RenderHelper {
                 playerStatusLocal.getScreenData().setTexturePixelData(byteBuffer);
                 WatutMod.getPlayerStatusManagerClient().sendScreenRenderData(playerStatusLocal);
             }
-
-            ScreenParticleRenderer.getInstance().unbindScaledDown();
 
             bindVanillaRenderTargetAndSetupProjectionMatrix();
         }
@@ -595,10 +573,35 @@ public class RenderHelper {
     public static ByteBuffer getPixelDataFromFrameBuffer() {
         int width = ScreenParticleRenderer.getInstance().widthScaledDown;
         int height = ScreenParticleRenderer.getInstance().heightScaledDown;
+        int bufferSize = width * height * ScreenParticleRenderer.bytesPerPixel;
 
-        ByteBuffer pixelBuffer = ByteBuffer.allocateDirect(width * height * ScreenParticleRenderer.bytesPerPixel); // RGBA = 4 bytes per pixel
-        GL11.glReadPixels(0, 0, width, height, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, pixelBuffer);
+        // In 1.21.5, GL11.glReadPixels is no longer the correct approach
+        // Use CommandEncoder.copyTextureToBuffer for GPU texture readback
+        GpuTexture texture = ScreenParticleRenderer.getInstance().getMainRenderTargetScaledDown().getColorTexture();
+        if (texture == null) {
+            return ByteBuffer.allocateDirect(bufferSize);
+        }
 
+        // Create a GPU buffer for readback
+        GpuBuffer readbackBuffer = RenderSystem.getDevice().createBuffer(
+                () -> "watut_readback", BufferType.PIXEL_PACK, BufferUsage.STATIC_READ, bufferSize);
+
+        // Copy texture to buffer (offset=0, mipLevel=0)
+        RenderSystem.getDevice().createCommandEncoder()
+                .copyTextureToBuffer(texture, readbackBuffer, 0, () -> {}, 0);
+
+        // Read the buffer data
+        ByteBuffer pixelBuffer = ByteBuffer.allocateDirect(bufferSize);
+        try (GpuBuffer.ReadView readView = RenderSystem.getDevice().createCommandEncoder().readBuffer(readbackBuffer)) {
+            ByteBuffer gpuData = readView.data();
+            if (gpuData != null && gpuData.remaining() >= bufferSize) {
+                gpuData.limit(gpuData.position() + bufferSize);
+                pixelBuffer.put(gpuData);
+                pixelBuffer.flip();
+            }
+        }
+
+        readbackBuffer.close();
         return pixelBuffer;
     }
 
@@ -622,42 +625,17 @@ public class RenderHelper {
         /*int width = ScreenParticleRenderer.getInstance().widthScaledDown;
         int height = ScreenParticleRenderer.getInstance().heightScaledDown;*/
 
-        ByteBuffer pixelBuffer = ByteBuffer.allocateDirect(width * height * ScreenParticleRenderer.bytesPerPixel); // RGBA = 4 bytes per pixel
-        GL11.glReadPixels(0, 0, width, height, GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, pixelBuffer);
+        //TODO: readPixelsTest needs rework for 1.21.5 GPU abstraction
+        CULog.dbg("readPixelsTest: not implemented for 1.21.5");
+    }
 
-        // Process the pixel data (example: print the color of the first pixel)
-        int red = Byte.toUnsignedInt(pixelBuffer.get(0));
-        int green = Byte.toUnsignedInt(pixelBuffer.get(1));
-        int blue = Byte.toUnsignedInt(pixelBuffer.get(2));
-        int alpha = Byte.toUnsignedInt(pixelBuffer.get(3));
-
-        /**
-         * The pixel data is read from the lower-left corner of the framebuffer by default.
-         * Ensure the buffer size matches the width, height, and bytes per pixel.
-         * Performance: glReadPixels can be slow, so avoid using it in performance-critical loops.
-         */
-
-        /**
-         * reading specific pixel:
-         *
-         * int index = (y * width + x) * componentsPerPixel;
-         */
-
-        int x = width / 2; // X coordinate of the pixel
-        int y = height / 2; // Y coordinate of the pixel
-
-        // Calculate the index for pixel (x, y)
-        int componentsPerPixel = 4; // RGBA
-        int index = (y * width + x) * componentsPerPixel;
-
-        red = Byte.toUnsignedInt(pixelBuffer.get(index));
-        green = Byte.toUnsignedInt(pixelBuffer.get(index + 1));
-        blue = Byte.toUnsignedInt(pixelBuffer.get(index + 2));
-        alpha = Byte.toUnsignedInt(pixelBuffer.get(index + 3));
-
-        System.out.printf("Pixel color at (0,0): R=%d, G=%d, B=%d, A=%d%n", red, green, blue, alpha);
-
-        //confirmed works
+    private static boolean hasNonZeroData(ByteBuffer buffer) {
+        int pos = buffer.position();
+        int limit = Math.min(buffer.limit(), pos + 1024);
+        for (int i = pos; i < limit; i++) {
+            if (buffer.get(i) != 0) return true;
+        }
+        return false;
     }
 
 }

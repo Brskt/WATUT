@@ -1,5 +1,5 @@
 plugins {
-    id 'fabric-loom' version '1.9-SNAPSHOT'
+    id 'fabric-loom' version '1.10-SNAPSHOT'
     id 'maven-publish'
     id "com.hypherionmc.modutils.modpublisher" version "2.1.6"
 }
@@ -10,11 +10,7 @@ group = project.maven_group
 sourceSets.main.resources { srcDir 'src/generated/resources' }
 
 repositories {
-    // Add repositories to retrieve artifacts from in here.
-    // You should only use this when depending on other mods because
-    // Loom adds the essential maven repositories to download Minecraft and libraries from automatically.
-    // See https://docs.gradle.org/current/userguide/declaring_repositories.html
-    // for more information about repositories.
+    mavenLocal()
 
     // Complete Config repos
     maven {
@@ -49,7 +45,7 @@ dependencies {
     minecraft "com.mojang:minecraft:${project.minecraft_version}"
     mappings loom.layered() {
         officialMojangMappings()
-        parchment("org.parchmentmc.data:parchment-${project.parchment_mc_version}:${project.parchment_version}@zip")
+        //parchment("org.parchmentmc.data:parchment-${project.parchment_mc_version}:${project.parchment_version}@zip")
     }
     /*parchment("org.parchmentmc.data:parchment-${minecraft_version}:${parchment_version}@zip")
     mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"
@@ -63,7 +59,7 @@ dependencies {
 
     //include(modImplementation("ForgeConfigAPIPort:ForgeConfigAPIPort:v8.0.0-1.20.1-Fabric"))
     //using https://www.curseforge.com/minecraft/mc-mods/forge-config-api-port-fabric/files/4583000
-    include(modImplementation("curse.maven:forge-config-api-port-fabric-547434:5982393"))
+    include(modImplementation("curse.maven:forge-config-api-port-fabric-547434:7213620"))
     implementation 'com.electronwill.night-config:core:3.7.3'
     implementation 'com.electronwill.night-config:toml:3.7.3'
     //include(modImplementation("fuzs.forgeconfigapiport:forgeconfigapiport-fabric:v8.0.0-1.20.1-Fabric"))

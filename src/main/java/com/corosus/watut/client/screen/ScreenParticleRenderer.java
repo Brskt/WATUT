@@ -3,15 +3,21 @@ package com.corosus.watut.client.screen;
 import com.corosus.coroutil.util.CULog;
 import com.corosus.watut.PlayerStatusManagerClient;
 import com.corosus.watut.config.ConfigServerControlledSyncedToClient;
+import com.mojang.blaze3d.ProjectionType;
+import com.mojang.blaze3d.buffers.GpuBuffer;
 import com.mojang.blaze3d.pipeline.MainTarget;
-import com.mojang.blaze3d.platform.GlStateManager;
+import com.mojang.blaze3d.pipeline.RenderTarget;
+import com.mojang.blaze3d.systems.CommandEncoder;
+import com.mojang.blaze3d.systems.RenderPass;
 import com.mojang.blaze3d.systems.RenderSystem;
-import com.mojang.blaze3d.vertex.*;
+import com.mojang.blaze3d.textures.GpuTexture;
+import com.mojang.blaze3d.vertex.VertexFormat;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.renderer.CoreShaders;
-import net.minecraft.client.renderer.GameRenderer;
+import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.resources.ResourceLocation;
 import org.joml.Matrix4f;
+
+import java.util.OptionalInt;
 
 public class ScreenParticleRenderer {
 
@@ -55,8 +61,8 @@ public class ScreenParticleRenderer {
         width = mc.getWindow().getWidth();
         height = mc.getWindow().getHeight();
         mainRenderTarget = new MainTarget(width, height);
-        mainRenderTarget.setClearColor(0.0F, 0.0F, 0.0F, 0.0F);
-        mainRenderTarget.clear();
+        CommandEncoder encoder = RenderSystem.getDevice().createCommandEncoder();
+        encoder.clearColorTexture(mainRenderTarget.getColorTexture(), 0);
 
         if (ConfigServerControlledSyncedToClient.dynamicGuiShowClientsEntireScreen) {
             widthScaledDown = width;
@@ -67,8 +73,7 @@ public class ScreenParticleRenderer {
         }
 
         mainRenderTargetScaledDown = new MainTarget(widthScaledDown, heightScaledDown);
-        mainRenderTargetScaledDown.setClearColor(0.0F, 0.0F, 0.0F, 0.0F);
-        mainRenderTargetScaledDown.clear();
+        encoder.clearColorTexture(mainRenderTargetScaledDown.getColorTexture(), 0);
     }
 
     public synchronized void resize(int width, int height) {
@@ -98,20 +103,34 @@ public class ScreenParticleRenderer {
         }
     }
 
+    private RenderTarget savedMainRenderTarget;
+
     public void bind() {
-        mainRenderTarget.bindWrite(true);
+        Minecraft mc = Minecraft.getInstance();
+        savedMainRenderTarget = mc.mainRenderTarget;
+        mc.mainRenderTarget = mainRenderTarget;
+        CommandEncoder encoder = RenderSystem.getDevice().createCommandEncoder();
+        encoder.clearColorTexture(mainRenderTarget.getColorTexture(), 0);
+        // Clear depth to 1.0 so GUI fragments pass the depth test (LEQUAL)
+        if (mainRenderTarget.getDepthTexture() != null) {
+            encoder.clearDepthTexture(mainRenderTarget.getDepthTexture(), 1.0);
+        }
     }
 
     public void unbind() {
-        mainRenderTarget.unbindWrite();
+        Minecraft mc = Minecraft.getInstance();
+        if (savedMainRenderTarget != null) {
+            mc.mainRenderTarget = savedMainRenderTarget;
+            savedMainRenderTarget = null;
+        }
     }
 
     public void bindScaledDown() {
-        mainRenderTargetScaledDown.bindWrite(true);
+        // No-op in 1.21.5 - scaled down target is written to via RenderPass
     }
 
     public void unbindScaledDown() {
-        mainRenderTargetScaledDown.unbindWrite();
+        // No-op in 1.21.5 - scaled down target is written to via RenderPass
     }
 
     public MainTarget getMainRenderTarget() {
@@ -126,173 +145,121 @@ public class ScreenParticleRenderer {
         this.mainRenderTarget = mainRenderTarget;
     }
 
-    public void innerBlitCustomShader(PoseStack pose, int p_281399_, int p_283222_, int p_283615_, int p_283430_, int p_281729_, float p_283247_, float p_282598_, float p_282883_, float p_283017_) {
-        RenderSystem.setShaderTexture(0, mainRenderTarget.getColorTextureId());
-        RenderSystem.setShader(PlayerStatusManagerClient.positionTexBlur.getProgram());
+    public void innerBlitCustomShader(int p_281399_, int p_283222_, int p_283615_, int p_283430_, int p_281729_, float minU, float maxU, float minV, float maxV) {
+        GpuTexture inputTexture = mainRenderTarget.getColorTexture();
+        GpuTexture outputTexture = mainRenderTargetScaledDown.getColorTexture();
+        if (inputTexture == null || outputTexture == null) return;
 
-        if (PlayerStatusManagerClient.positionTexBlur == null) {
-            return;
+        RenderSystem.AutoStorageIndexBuffer seqBuf = RenderSystem.getSequentialBuffer(VertexFormat.Mode.QUADS);
+        GpuBuffer indexBuffer = seqBuf.getBuffer(6);
+        GpuBuffer quadBuffer = RenderSystem.getQuadVertexBuffer();
+
+        RenderSystem.backupProjectionMatrix();
+        RenderSystem.setProjectionMatrix(new Matrix4f().setOrtho(0.0f, widthScaledDown, 0.0f, heightScaledDown, 0.1f, 1000.0f), ProjectionType.ORTHOGRAPHIC);
+        try (RenderPass renderPass = RenderSystem.getDevice().createCommandEncoder()
+                .createRenderPass(outputTexture, OptionalInt.of(0))) {
+            renderPass.setPipeline(PlayerStatusManagerClient.positionTexBlur.getPipeline());
+            renderPass.bindSampler("InSampler", inputTexture);
+            renderPass.setUniform("resolution", (float)widthScaledDown, (float)heightScaledDown);
+            renderPass.setUniform("radius", 0f);
+            renderPass.setUniform("InCropMin", minU, minV);
+            renderPass.setUniform("InCropMax", maxU, maxV);
+            renderPass.setUniform("OutSize", (float)widthScaledDown, (float)heightScaledDown);
+            renderPass.setVertexBuffer(0, quadBuffer);
+            renderPass.setIndexBuffer(indexBuffer, seqBuf.type());
+            renderPass.drawIndexed(0, 6);
         }
-        if (PlayerStatusManagerClient.positionTexBlur.RESOLUTION != null) {
-            int sizeX = ScreenParticleRenderer.getInstance().widthScaledDown;
-            int sizeY = ScreenParticleRenderer.getInstance().heightScaledDown;
-            PlayerStatusManagerClient.positionTexBlur.RESOLUTION.set((float)sizeX, (float)sizeY);
-        }
-        if (PlayerStatusManagerClient.positionTexBlur.RADIUS != null) {
-            PlayerStatusManagerClient.positionTexBlur.RADIUS.set((float)0);
-        }
-
-        Matrix4f matrix4f = pose.last().pose();
-        BufferBuilder bufferbuilder = Tesselator.getInstance().begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_TEX);
-        //bufferbuilder.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_TEX);
-
-        //UV coordinates adjusted to fix upside down render from data from earlier, cant figure out why its backwards to begin with but we fixed it via UV here
-        // Bottom-left vertex
-        bufferbuilder.addVertex(matrix4f, (float)p_281399_, (float)p_283615_, (float)p_281729_).setUv(p_283247_, p_283017_);
-        // Top-left vertex
-        bufferbuilder.addVertex(matrix4f, (float)p_281399_, (float)p_283430_, (float)p_281729_).setUv(p_283247_, p_282883_);
-        // Top-right vertex
-        bufferbuilder.addVertex(matrix4f, (float)p_283222_, (float)p_283430_, (float)p_281729_).setUv(p_282598_, p_282883_);
-        // Bottom-right vertex
-        bufferbuilder.addVertex(matrix4f, (float)p_283222_, (float)p_283615_, (float)p_281729_).setUv(p_282598_, p_283017_);
-
-        BufferUploader.drawWithShader(bufferbuilder.build());
+        RenderSystem.restoreProjectionMatrix();
     }
 
-    public void innerBlitCustomShader2(int textureID, PoseStack pose, int p_281399_, int p_283222_, int p_283615_, int p_283430_, int p_281729_, float p_283247_, float p_282598_, float p_282883_, float p_283017_) {
-        //RenderSystem._setShaderTexture(0, mainRenderTarget.getColorTextureId());
-        RenderSystem.setShaderTexture(0, mainRenderTarget.getColorTextureId());
-        RenderSystem.setShader(PlayerStatusManagerClient.positionTexBlur.getProgram());
+    public void innerBlitCustomShader2(int textureID, int p_281399_, int p_283222_, int p_283615_, int p_283430_, int p_281729_, float minU, float maxU, float minV, float maxV) {
+        GpuTexture inputTexture = mainRenderTarget.getColorTexture();
+        GpuTexture outputTexture = mainRenderTargetScaledDown.getColorTexture();
+        if (inputTexture == null || outputTexture == null) return;
 
-        if (PlayerStatusManagerClient.positionTexBlur == null) {
-            return;
+        RenderSystem.AutoStorageIndexBuffer seqBuf = RenderSystem.getSequentialBuffer(VertexFormat.Mode.QUADS);
+        GpuBuffer indexBuffer = seqBuf.getBuffer(6);
+        GpuBuffer quadBuffer = RenderSystem.getQuadVertexBuffer();
+
+        RenderSystem.backupProjectionMatrix();
+        RenderSystem.setProjectionMatrix(new Matrix4f().setOrtho(0.0f, widthScaledDown, 0.0f, heightScaledDown, 0.1f, 1000.0f), ProjectionType.ORTHOGRAPHIC);
+        try (RenderPass renderPass = RenderSystem.getDevice().createCommandEncoder()
+                .createRenderPass(outputTexture, OptionalInt.of(0))) {
+            renderPass.setPipeline(PlayerStatusManagerClient.positionTexBlur.getPipeline());
+            renderPass.bindSampler("InSampler", inputTexture);
+            renderPass.setUniform("resolution", (float)widthScaledDown, (float)heightScaledDown);
+            renderPass.setUniform("radius", 0f);
+            renderPass.setUniform("InCropMin", minU, minV);
+            renderPass.setUniform("InCropMax", maxU, maxV);
+            renderPass.setUniform("OutSize", (float)widthScaledDown, (float)heightScaledDown);
+            renderPass.setVertexBuffer(0, quadBuffer);
+            renderPass.setIndexBuffer(indexBuffer, seqBuf.type());
+            renderPass.drawIndexed(0, 6);
         }
-        if (PlayerStatusManagerClient.positionTexBlur.RESOLUTION != null) {
-            int sizeX = ScreenParticleRenderer.getInstance().widthScaledDown;
-            int sizeY = ScreenParticleRenderer.getInstance().heightScaledDown;
-            PlayerStatusManagerClient.positionTexBlur.RESOLUTION.set((float)sizeX, (float)sizeY);
-        }
-        if (PlayerStatusManagerClient.positionTexBlur.RADIUS != null) {
-            PlayerStatusManagerClient.positionTexBlur.RADIUS.set((float)0);
-        }
-
-        Matrix4f matrix4f = pose.last().pose();
-        BufferBuilder bufferbuilder = Tesselator.getInstance().begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_TEX);
-        //bufferbuilder.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_TEX);
-
-        //UV coordinates adjusted to fix upside down render from data from earlier, cant figure out why its backwards to begin with but we fixed it via UV here
-        // Bottom-left vertex
-        bufferbuilder.addVertex(matrix4f, (float)p_281399_, (float)p_283615_, (float)p_281729_).setUv(p_283247_, p_283017_);
-        // Top-left vertex
-        bufferbuilder.addVertex(matrix4f, (float)p_281399_, (float)p_283430_, (float)p_281729_).setUv(p_283247_, p_282883_);
-        // Top-right vertex
-        bufferbuilder.addVertex(matrix4f, (float)p_283222_, (float)p_283430_, (float)p_281729_).setUv(p_282598_, p_282883_);
-        // Bottom-right vertex
-        bufferbuilder.addVertex(matrix4f, (float)p_283222_, (float)p_283615_, (float)p_281729_).setUv(p_282598_, p_283017_);
-
-        BufferUploader.drawWithShader(bufferbuilder.build());
+        RenderSystem.restoreProjectionMatrix();
     }
 
-    public void innerBlitCustomShaderHorizontal(PoseStack pose, int p_281399_, int p_283222_, int p_283615_, int p_283430_, int p_281729_, float p_283247_, float p_282598_, float p_282883_, float p_283017_) {
+    public void innerBlitCustomShaderHorizontal(int p_281399_, int p_283222_, int p_283615_, int p_283430_, int p_281729_, float minU, float maxU, float minV, float maxV) {
+        GpuTexture inputTexture;
         if (RenderHelper.xaeroWorldMapTextureID != -1) {
-            //RenderSystem._setShaderTexture(0, RenderHelper.xaeroWorldMapTextureID);
-            GlStateManager._bindTexture(RenderHelper.xaeroWorldMapTextureID);
-            RenderSystem.setShaderTexture(0, RenderHelper.xaeroWorldMapTextureID);
-            /*int test = 181;
-            GlStateManager._bindTexture(test);
-            RenderSystem.setShaderTexture(0, test);*/
+            //TODO: xaero integration needs rework for 1.21.5 GPU abstraction
+            inputTexture = mainRenderTarget.getColorTexture();
         } else {
-            RenderSystem.setShaderTexture(0, mainRenderTarget.getColorTextureId());
+            inputTexture = mainRenderTarget.getColorTexture();
         }
-        //RenderSystem._setShaderTexture(0, mainRenderTarget.getColorTextureId());
-        RenderSystem.setShader(PlayerStatusManagerClient.positionTexBlurHorizontal.getProgram());
+        GpuTexture outputTexture = mainRenderTargetScaledDown.getColorTexture();
+        if (inputTexture == null || outputTexture == null) return;
 
-        if (PlayerStatusManagerClient.positionTexBlurHorizontal == null) {
-            return;
+        RenderSystem.AutoStorageIndexBuffer seqBuf = RenderSystem.getSequentialBuffer(VertexFormat.Mode.QUADS);
+        GpuBuffer indexBuffer = seqBuf.getBuffer(6);
+        GpuBuffer quadBuffer = RenderSystem.getQuadVertexBuffer();
+
+        RenderSystem.backupProjectionMatrix();
+        RenderSystem.setProjectionMatrix(new Matrix4f().setOrtho(0.0f, widthScaledDown, 0.0f, heightScaledDown, 0.1f, 1000.0f), ProjectionType.ORTHOGRAPHIC);
+        try (RenderPass renderPass = RenderSystem.getDevice().createCommandEncoder()
+                .createRenderPass(outputTexture, OptionalInt.of(0))) {
+            renderPass.setPipeline(PlayerStatusManagerClient.positionTexBlurHorizontal.getPipeline());
+            renderPass.bindSampler("InSampler", inputTexture);
+            renderPass.setUniform("blurLevel", (float)(RenderHelper.xaeroWorldMapTextureID != -1 ? 0 : ConfigServerControlledSyncedToClient.dynamicGuiBlurLevel));
+            renderPass.setUniform("InCropMin", minU, minV);
+            renderPass.setUniform("InCropMax", maxU, maxV);
+            renderPass.setUniform("OutSize", (float)widthScaledDown, (float)heightScaledDown);
+            renderPass.setVertexBuffer(0, quadBuffer);
+            renderPass.setIndexBuffer(indexBuffer, seqBuf.type());
+            renderPass.drawIndexed(0, 6);
         }
-
-        if (PlayerStatusManagerClient.positionTexBlurHorizontal.BLUR_LEVEL != null) {
-            PlayerStatusManagerClient.positionTexBlurHorizontal.BLUR_LEVEL.set((float)(RenderHelper.xaeroWorldMapTextureID != -1 ? 0 : ConfigServerControlledSyncedToClient.dynamicGuiBlurLevel));
-        }
-
-        Matrix4f matrix4f = pose.last().pose();
-        BufferBuilder bufferbuilder = Tesselator.getInstance().begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_TEX);
-        //bufferbuilder.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_TEX);
-
-        if (RenderHelper.xaeroWorldMapTextureID != -1) {
-            bufferbuilder.addVertex(matrix4f, (float)p_281399_, (float)p_283615_, (float)p_281729_).setUv(p_283247_, p_282883_);
-            bufferbuilder.addVertex(matrix4f, (float)p_281399_, (float)p_283430_, (float)p_281729_).setUv(p_283247_, p_283017_);
-            bufferbuilder.addVertex(matrix4f, (float)p_283222_, (float)p_283430_, (float)p_281729_).setUv(p_282598_, p_283017_);
-            bufferbuilder.addVertex(matrix4f, (float)p_283222_, (float)p_283615_, (float)p_281729_).setUv(p_282598_, p_282883_);
-        } else {
-            //UV coordinates adjusted to fix upside down render from data from earlier, cant figure out why its backwards to begin with but we fixed it via UV here
-            // Bottom-left vertex
-            bufferbuilder.addVertex(matrix4f, (float)p_281399_, (float)p_283615_, (float)p_281729_).setUv(p_283247_, p_283017_);
-            // Top-left vertex
-            bufferbuilder.addVertex(matrix4f, (float)p_281399_, (float)p_283430_, (float)p_281729_).setUv(p_283247_, p_282883_);
-            // Top-right vertex
-            bufferbuilder.addVertex(matrix4f, (float)p_283222_, (float)p_283430_, (float)p_281729_).setUv(p_282598_, p_282883_);
-            // Bottom-right vertex
-            bufferbuilder.addVertex(matrix4f, (float)p_283222_, (float)p_283615_, (float)p_281729_).setUv(p_282598_, p_283017_);
-        }
-
-
-
-        BufferUploader.drawWithShader(bufferbuilder.build());
+        RenderSystem.restoreProjectionMatrix();
     }
 
-    public void innerBlitCustomShaderVertical(PoseStack pose, int p_281399_, int p_283222_, int p_283615_, int p_283430_, int p_281729_, float p_283247_, float p_282598_, float p_282883_, float p_283017_) {
-        RenderSystem.setShaderTexture(0, mainRenderTargetScaledDown.getColorTextureId());
-        //RenderSystem._setShaderTexture(0, mainRenderTarget.getColorTextureId());
-        RenderSystem.setShader(PlayerStatusManagerClient.positionTexBlurVertical.getProgram());
+    public void innerBlitCustomShaderVertical(int p_281399_, int p_283222_, int p_283615_, int p_283430_, int p_281729_, float p_283247_, float p_282598_, float p_282883_, float p_283017_) {
+        GpuTexture inputTexture = mainRenderTargetScaledDown.getColorTexture();
+        GpuTexture outputTexture = mainRenderTargetScaledDown.getColorTexture();
+        if (inputTexture == null || outputTexture == null) return;
 
-        if (PlayerStatusManagerClient.positionTexBlurVertical == null) {
-            return;
+        RenderSystem.AutoStorageIndexBuffer seqBuf = RenderSystem.getSequentialBuffer(VertexFormat.Mode.QUADS);
+        GpuBuffer indexBuffer = seqBuf.getBuffer(6);
+        GpuBuffer quadBuffer = RenderSystem.getQuadVertexBuffer();
+
+        RenderSystem.backupProjectionMatrix();
+        RenderSystem.setProjectionMatrix(new Matrix4f().setOrtho(0.0f, widthScaledDown, 0.0f, heightScaledDown, 0.1f, 1000.0f), ProjectionType.ORTHOGRAPHIC);
+        try (RenderPass renderPass = RenderSystem.getDevice().createCommandEncoder()
+                .createRenderPass(outputTexture, OptionalInt.empty())) {
+            renderPass.setPipeline(PlayerStatusManagerClient.positionTexBlurVertical.getPipeline());
+            renderPass.bindSampler("InSampler", inputTexture);
+            renderPass.setUniform("resolution", (float)widthScaledDown, (float)heightScaledDown);
+            renderPass.setUniform("radius", (float) ConfigServerControlledSyncedToClient.dynamicGuiSizeRadiusInPixelsToShow);
+            renderPass.setUniform("blurLevel", (float)(RenderHelper.xaeroWorldMapTextureID != -1 ? 0 : ConfigServerControlledSyncedToClient.dynamicGuiBlurLevel));
+            renderPass.setUniform("OutSize", (float)widthScaledDown, (float)heightScaledDown);
+            renderPass.setVertexBuffer(0, quadBuffer);
+            renderPass.setIndexBuffer(indexBuffer, seqBuf.type());
+            renderPass.drawIndexed(0, 6);
         }
-        if (PlayerStatusManagerClient.positionTexBlurVertical.RESOLUTION != null) {
-            int sizeX = ScreenParticleRenderer.getInstance().widthScaledDown;
-            int sizeY = ScreenParticleRenderer.getInstance().heightScaledDown;
-            PlayerStatusManagerClient.positionTexBlurVertical.RESOLUTION.set((float)sizeX, (float)sizeY);
-        }
-
-        //visual cutoff radius
-        if (PlayerStatusManagerClient.positionTexBlurVertical.RADIUS != null) {
-            PlayerStatusManagerClient.positionTexBlurVertical.RADIUS.set((float) ConfigServerControlledSyncedToClient.dynamicGuiSizeRadiusInPixelsToShow);
-        }
-
-        if (PlayerStatusManagerClient.positionTexBlurVertical.BLUR_LEVEL != null) {
-            PlayerStatusManagerClient.positionTexBlurVertical.BLUR_LEVEL.set((float)(RenderHelper.xaeroWorldMapTextureID != -1 ? 0 : ConfigServerControlledSyncedToClient.dynamicGuiBlurLevel));
-        }
-
-        Matrix4f matrix4f = pose.last().pose();
-        BufferBuilder bufferbuilder = Tesselator.getInstance().begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_TEX);
-        //bufferbuilder.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_TEX);
-
-        //UV coordinates adjusted to fix upside down render from data from earlier, cant figure out why its backwards to begin with but we fixed it via UV here
-        // Bottom-left vertex
-        bufferbuilder.addVertex(matrix4f, (float)p_281399_, (float)p_283615_, (float)p_281729_).setUv(p_283247_, p_283017_);
-        // Top-left vertex
-        bufferbuilder.addVertex(matrix4f, (float)p_281399_, (float)p_283430_, (float)p_281729_).setUv(p_283247_, p_282883_);
-        // Top-right vertex
-        bufferbuilder.addVertex(matrix4f, (float)p_283222_, (float)p_283430_, (float)p_281729_).setUv(p_282598_, p_282883_);
-        // Bottom-right vertex
-        bufferbuilder.addVertex(matrix4f, (float)p_283222_, (float)p_283615_, (float)p_281729_).setUv(p_282598_, p_283017_);
-
-        BufferUploader.drawWithShader(bufferbuilder.build());
+        RenderSystem.restoreProjectionMatrix();
     }
 
-    //copy of GuiGraphics.innerBlit with PoseStack added
-    public void innerBlit(PoseStack pose, ResourceLocation atlasLocation, int x1, int x2, int y1, int y2, int blitOffset, float minU, float maxU, float minV, float maxV) {
-        RenderSystem.setShaderTexture(0, atlasLocation);
-        //RenderSystem.setShaderTexture(0, mainRenderTarget.getColorTextureId());
-        RenderSystem.setShader(CoreShaders.POSITION_TEX);
-        Matrix4f matrix4f = pose.last().pose();
-        BufferBuilder bufferBuilder = Tesselator.getInstance().begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_TEX);
-        //bufferbuilder.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_TEX);
-        bufferBuilder.addVertex(matrix4f, (float)x1, (float)y1, (float)blitOffset).setUv(minU, minV);
-        bufferBuilder.addVertex(matrix4f, (float)x1, (float)y2, (float)blitOffset).setUv(minU, maxV);
-        bufferBuilder.addVertex(matrix4f, (float)x2, (float)y2, (float)blitOffset).setUv(maxU, maxV);
-        bufferBuilder.addVertex(matrix4f, (float)x2, (float)y1, (float)blitOffset).setUv(maxU, minV);
-        BufferUploader.drawWithShader(bufferBuilder.build());
+    //copy of GuiGraphics.innerBlit with PoseStack added - now uses blit pipeline
+    public void innerBlit(ResourceLocation atlasLocation, int x1, int x2, int y1, int y2, int blitOffset, float minU, float maxU, float minV, float maxV) {
+        //TODO: cursor rendering needs rework for 1.21.5 - using blit pipeline won't support custom UVs
+        // For now this is a no-op, cursor won't render in capture
     }
 }

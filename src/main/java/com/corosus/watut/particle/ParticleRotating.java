@@ -1,16 +1,20 @@
 package com.corosus.watut.particle;
 
 import com.corosus.watut.client.ParticleRenderTypeOld;
-import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.blaze3d.pipeline.BlendFunction;
+import com.mojang.blaze3d.pipeline.RenderPipeline;
 import com.mojang.blaze3d.vertex.*;
 import com.mojang.math.Axis;
 import net.minecraft.client.Camera;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.particle.ParticleRenderType;
 import net.minecraft.client.particle.TextureSheetParticle;
+import net.minecraft.client.renderer.RenderPipelines;
+import net.minecraft.client.renderer.RenderStateShard;
+import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.texture.TextureAtlas;
-import net.minecraft.client.renderer.texture.TextureManager;
 import net.minecraft.util.Mth;
+import net.minecraft.util.TriState;
 import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.Nullable;
 import org.joml.Quaternionf;
@@ -30,18 +34,32 @@ public abstract class ParticleRotating extends TextureSheetParticle {
     //removes particle once hits 0, other things should reset this to keep it spawned
     public int despawnCountdown = 40;
 
+    // Custom pipeline with cull=false — replaces the old begin()/end() GL state that called glDisable(GL_CULL_FACE)
+    private static final RenderPipeline TRANSLUCENT_PARTICLE_NO_CULL_PIPELINE = RenderPipelines.register(
+            RenderPipeline.builder(RenderPipelines.PARTICLE_SNIPPET)
+                    .withLocation("pipeline/watut_translucent_particle_no_cull_particles")
+                    .withBlend(BlendFunction.TRANSLUCENT)
+                    .withCull(false)
+                    .build());
+
+    private static final RenderPipeline TRANSLUCENT_PARTICLE_NO_CULL_NO_DEPTH_PIPELINE = RenderPipelines.register(
+            RenderPipeline.builder(RenderPipelines.PARTICLE_SNIPPET)
+                    .withLocation("pipeline/watut_translucent_particle_no_cull_no_depth")
+                    .withBlend(BlendFunction.TRANSLUCENT)
+                    .withCull(false)
+                    .withDepthTestFunction(com.mojang.blaze3d.platform.DepthTestFunction.NO_DEPTH_TEST)
+                    .withDepthWrite(false)
+                    .build());
 
     public static ParticleRenderTypeOld CUSTOM = new ParticleRenderTypeOld() {
         @Override
-        public @Nullable BufferBuilder begin(Tesselator tesselator, TextureManager textureManager) {
-            RenderSystem.depthMask(true);
-            RenderSystem.disableBlend();
-            return tesselator.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.PARTICLE);
+        public RenderType getRenderType() {
+            return RenderType.opaqueParticle(TextureAtlas.LOCATION_PARTICLES);
         }
 
-        public void begin(BufferBuilder p_107469_, TextureManager p_107470_) {
-            RenderSystem.depthMask(true);
-            RenderSystem.disableBlend();
+        @Override
+        public boolean isTranslucent() {
+            return false;
         }
 
         public String toString() {
@@ -49,15 +67,20 @@ public abstract class ParticleRotating extends TextureSheetParticle {
         }
     };
 
+    private static final RenderType TRANSLUCENT_PARTICLE_NO_CULL_RENDER_TYPE = RenderType.create(
+            "watut_translucent_particle_no_cull_particles",
+            1536,
+            TRANSLUCENT_PARTICLE_NO_CULL_PIPELINE,
+            RenderType.CompositeState.builder()
+                    .setTextureState(new RenderStateShard.TextureStateShard(TextureAtlas.LOCATION_PARTICLES, TriState.FALSE, false))
+                    .setOutputState(RenderStateShard.PARTICLES_TARGET)
+                    .setLightmapState(RenderStateShard.LIGHTMAP)
+                    .createCompositeState(false));
+
     public static ParticleRenderTypeOld PARTICLE_SHEET_TRANSLUCENT_NO_FACE_CULL = new ParticleRenderTypeOld() {
-        public @Nullable BufferBuilder begin(Tesselator tesselator, TextureManager textureManager) {
-            RenderSystem.depthMask(true);
-            RenderSystem.setShaderTexture(0, TextureAtlas.LOCATION_PARTICLES);
-            //RenderSystem.setShaderTexture(0, 219);
-            RenderSystem.enableBlend();
-            RenderSystem.defaultBlendFunc();
-            RenderSystem.disableCull();
-            return tesselator.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.PARTICLE);
+        @Override
+        public RenderType getRenderType() {
+            return TRANSLUCENT_PARTICLE_NO_CULL_RENDER_TYPE;
         }
 
         public String toString() {
@@ -65,15 +88,20 @@ public abstract class ParticleRotating extends TextureSheetParticle {
         }
     };
 
+    private static final RenderType TERRAIN_TRANSLUCENT_NO_CULL_RENDER_TYPE = RenderType.create(
+            "watut_translucent_particle_no_cull_terrain",
+            1536,
+            TRANSLUCENT_PARTICLE_NO_CULL_NO_DEPTH_PIPELINE,
+            RenderType.CompositeState.builder()
+                    .setTextureState(new RenderStateShard.TextureStateShard(TextureAtlas.LOCATION_BLOCKS, TriState.FALSE, false))
+                    .setOutputState(RenderStateShard.PARTICLES_TARGET)
+                    .setLightmapState(RenderStateShard.LIGHTMAP)
+                    .createCompositeState(false));
+
     public static ParticleRenderTypeOld TERRAIN_SHEET_TRANSLUCENT_NO_FACE_CULL = new ParticleRenderTypeOld() {
-        public @Nullable BufferBuilder begin(Tesselator tesselator, TextureManager textureManager) {
-            RenderSystem.depthMask(true);
-            RenderSystem.setShaderTexture(0, TextureAtlas.LOCATION_BLOCKS);
-            RenderSystem.enableBlend();
-            RenderSystem.defaultBlendFunc();
-            RenderSystem.disableCull();
-            RenderSystem.disableDepthTest();
-            return tesselator.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.PARTICLE);
+        @Override
+        public RenderType getRenderType() {
+            return TERRAIN_TRANSLUCENT_NO_CULL_RENDER_TYPE;
         }
 
         public String toString() {

@@ -20,7 +20,6 @@ import net.minecraft.client.model.PlayerModel;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.PlayerInfo;
 import net.minecraft.client.player.AbstractClientPlayer;
-import net.minecraft.client.renderer.ShaderProgram;
 import net.minecraft.client.renderer.entity.LivingEntityRenderer;
 import net.minecraft.client.renderer.entity.state.PlayerRenderState;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
@@ -147,6 +146,8 @@ public class PlayerStatusManagerClient extends PlayerStatusManager {
         boolean stillActiveInGUI = selfPlayerStatus.getTicksSinceLastAction() < (20 * 5);
         boolean delayPassed = selfPlayerStatus.getScreenData().getGameTicksSinceLastScreenSend() + ConfigServerControlledSyncedToClient.dynamicGuiTickSendRateOfGUIUpdates < gameTime;
         boolean canRenderANewGUI = !ConfigServerControlledSyncedToClient.dynamicGuiDontSendConstantGUIUpdates || selfPlayerStatus.getScreenData().getLastScreen() != screen;
+
+
         /**
          * this (anotherPlayerNear) must always be true for how the code was structured, we need to render a new frame regardless of if another player was around or not
          * scenario 1: dynamicGuiDontSendConstantGUIUpdates is true, and we need the latest frame ready to send out if a player comes near
@@ -1236,7 +1237,6 @@ public class PlayerStatusManagerClient extends PlayerStatusManager {
         int packetSizeLimit = 31000;
         int sizeByteCount = status.getScreenData().getTexturePixelData().remaining();
         int sizeByteCountLimit = status.getScreenData().getTexturePixelData().limit();
-
         if (status.getScreenData().getTexturePixelData() != null) {
             byte[] inputBytes = new byte[sizeByteCount];
             status.getScreenData().getTexturePixelData().get(inputBytes);
@@ -1310,13 +1310,13 @@ public class PlayerStatusManagerClient extends PlayerStatusManager {
         PlayerStatus statusPrev = getStatusPrev(uuid);
 
         if (data.contains(WatutNetworking.NBTDataPlayerTypingAmp)) {
-            status.setTypingAmplifier(data.getFloat(WatutNetworking.NBTDataPlayerTypingAmp));
+            status.setTypingAmplifier(data.getFloat(WatutNetworking.NBTDataPlayerTypingAmp).orElse(0f));
         }
 
         if (data.contains(WatutNetworking.NBTDataPlayerMouseX)) {
-            float x = data.getFloat(WatutNetworking.NBTDataPlayerMouseX);
-            float y = data.getFloat(WatutNetworking.NBTDataPlayerMouseY);
-            boolean pressed = data.getBoolean(WatutNetworking.NBTDataPlayerMousePressed);
+            float x = data.getFloat(WatutNetworking.NBTDataPlayerMouseX).orElse(0f);
+            float y = data.getFloat(WatutNetworking.NBTDataPlayerMouseY).orElse(0f);
+            boolean pressed = data.getBoolean(WatutNetworking.NBTDataPlayerMousePressed).orElse(false);
             boolean differentPress = status.isPressing() != pressed;
             setMouse(uuid, x, y, pressed);
             setPoseTarget(uuid, differentPress);
@@ -1330,10 +1330,10 @@ public class PlayerStatusManagerClient extends PlayerStatusManager {
         }
 
         if (data.contains(WatutNetworking.NBTDataPlayerGuiStatus)) {
-            PlayerStatus.PlayerGuiState playerGuiState = PlayerStatus.PlayerGuiState.get(data.getInt(WatutNetworking.NBTDataPlayerGuiStatus));
+            PlayerStatus.PlayerGuiState playerGuiState = PlayerStatus.PlayerGuiState.get(data.getInt(WatutNetworking.NBTDataPlayerGuiStatus).orElse(0));
             status.setPlayerGuiState(playerGuiState);
-            if (data.contains(WatutNetworking.NBTDataPlayerGuiDontSendDetailedGUIInfo)) status.setPlayerGuiDontSendDetailedGUIInfo(data.getBoolean(WatutNetworking.NBTDataPlayerGuiDontSendDetailedGUIInfo));
-            if (data.contains(WatutNetworking.NBTDataPlayerGuiDontSendItemInfo)) status.setPlayerGuiDontSendItemInfo(data.getBoolean(WatutNetworking.NBTDataPlayerGuiDontSendItemInfo));
+            if (data.contains(WatutNetworking.NBTDataPlayerGuiDontSendDetailedGUIInfo)) status.setPlayerGuiDontSendDetailedGUIInfo(data.getBoolean(WatutNetworking.NBTDataPlayerGuiDontSendDetailedGUIInfo).orElse(false));
+            if (data.contains(WatutNetworking.NBTDataPlayerGuiDontSendItemInfo)) status.setPlayerGuiDontSendItemInfo(data.getBoolean(WatutNetworking.NBTDataPlayerGuiDontSendItemInfo).orElse(false));
             if (status.getPlayerGuiState() != statusPrev.getPlayerGuiState()) {
                 WatutMod.dbg("New gui player state and new pose target set relating to: " + status.getPlayerGuiState() + " for " + uuid);
                 if (statusPrev.getPlayerGuiState() == PlayerStatus.PlayerGuiState.NONE) {
@@ -1354,7 +1354,7 @@ public class PlayerStatusManagerClient extends PlayerStatusManager {
         
 
         if (data.contains(WatutNetworking.NBTDataPlayerChatStatus)) {
-            PlayerStatus.PlayerChatState state = PlayerStatus.PlayerChatState.get(data.getInt(WatutNetworking.NBTDataPlayerChatStatus));
+            PlayerStatus.PlayerChatState state = PlayerStatus.PlayerChatState.get(data.getInt(WatutNetworking.NBTDataPlayerChatStatus).orElse(0));
             status.setPlayerChatState(state);
             if (status.getPlayerChatState() != statusPrev.getPlayerChatState()) {
                 WatutMod.dbg("New chat player state and new pose target set relating to: " + status.getPlayerChatState() + " for " + uuid);
@@ -1371,11 +1371,11 @@ public class PlayerStatusManagerClient extends PlayerStatusManager {
 
         if (data.contains(WatutNetworking.NBTDataPlayerIdleTicks)) {
             //Watut.dbg("receive idle ticks from server: " + data.getInt(WatutNetworking.NBTDataPlayerIdleTicks) + " for " + uuid + " playerStatus hash: " + status);
-            status.setTicksSinceLastAction(data.getInt(WatutNetworking.NBTDataPlayerIdleTicks));
-            status.setTicksToMarkPlayerIdleSyncedForClient(data.getInt(WatutNetworking.NBTDataPlayerTicksToGoIdle));
-            statusPrev.setTicksToMarkPlayerIdleSyncedForClient(data.getInt(WatutNetworking.NBTDataPlayerTicksToGoIdle));
-            getStatusLocal().setTicksToMarkPlayerIdleSyncedForClient(data.getInt(WatutNetworking.NBTDataPlayerTicksToGoIdle));
-            getStatusPrevLocal().setTicksToMarkPlayerIdleSyncedForClient(data.getInt(WatutNetworking.NBTDataPlayerTicksToGoIdle));
+            status.setTicksSinceLastAction(data.getInt(WatutNetworking.NBTDataPlayerIdleTicks).orElse(0));
+            status.setTicksToMarkPlayerIdleSyncedForClient(data.getInt(WatutNetworking.NBTDataPlayerTicksToGoIdle).orElse(0));
+            statusPrev.setTicksToMarkPlayerIdleSyncedForClient(data.getInt(WatutNetworking.NBTDataPlayerTicksToGoIdle).orElse(0));
+            getStatusLocal().setTicksToMarkPlayerIdleSyncedForClient(data.getInt(WatutNetworking.NBTDataPlayerTicksToGoIdle).orElse(0));
+            getStatusPrevLocal().setTicksToMarkPlayerIdleSyncedForClient(data.getInt(WatutNetworking.NBTDataPlayerTicksToGoIdle).orElse(0));
             if (statusPrev.isIdle() != status.isIdle()) {
                 WatutMod.dbg("New idle player state and new pose target set relating to idle state: " + status.isIdle() + " for " + uuid);
                 setPoseTarget(uuid, false);
@@ -1387,12 +1387,12 @@ public class PlayerStatusManagerClient extends PlayerStatusManager {
         //if (true) return;
 
         if (data.contains(WatutNetworking.NBTDataPlayerScreenCompressedPixelData)) {
-            byte[] pixelData = data.getByteArray(WatutNetworking.NBTDataPlayerScreenCompressedPixelData);
-            int decompressedSize = data.getInt(WatutNetworking.NBTDataPlayerScreenCompressedPixelDataSize);
-            int packetCount = data.getInt(WatutNetworking.NBTDataPlayerScreenCompressedPixelDataPacketCount);
-            int packetIndex = data.getInt(WatutNetworking.NBTDataPlayerScreenCompressedPixelDataPacketIndex);
-            status.getScreenData().setWidth(data.getInt(WatutNetworking.NBTDataPlayerScreenWidth));
-            status.getScreenData().setHeight(data.getInt(WatutNetworking.NBTDataPlayerScreenHeight));
+            byte[] pixelData = data.getByteArray(WatutNetworking.NBTDataPlayerScreenCompressedPixelData).orElse(new byte[0]);
+            int decompressedSize = data.getInt(WatutNetworking.NBTDataPlayerScreenCompressedPixelDataSize).orElse(0);
+            int packetCount = data.getInt(WatutNetworking.NBTDataPlayerScreenCompressedPixelDataPacketCount).orElse(0);
+            int packetIndex = data.getInt(WatutNetworking.NBTDataPlayerScreenCompressedPixelDataPacketIndex).orElse(0);
+            status.getScreenData().setWidth(data.getInt(WatutNetworking.NBTDataPlayerScreenWidth).orElse(0));
+            status.getScreenData().setHeight(data.getInt(WatutNetworking.NBTDataPlayerScreenHeight).orElse(0));
             long gameTime = Minecraft.getInstance().level != null ? Minecraft.getInstance().level.getGameTime() : 0;
             int timeout = 10;
 
@@ -1455,16 +1455,18 @@ public class PlayerStatusManagerClient extends PlayerStatusManager {
     public void receiveItemMove(CompoundTag data) {
         if (data.contains(WatutNetworking.NBTDataItemTransferItemStack)) {
 
-            ItemStack itemStack = ItemStack.parseOptional(Minecraft.getInstance().level.registryAccess(), data.getCompound(WatutNetworking.NBTDataItemTransferItemStack));
+            ItemStack itemStack = data.getCompound(WatutNetworking.NBTDataItemTransferItemStack)
+                    .flatMap(tag -> ItemStack.parse(Minecraft.getInstance().level.registryAccess(), tag))
+                    .orElse(ItemStack.EMPTY);
             ParticleItem particleItem = new ParticleItem(Minecraft.getInstance().level, 1, itemStack,
                     Minecraft.getInstance().renderBuffers(),
                     Minecraft.getInstance().getEntityRenderDispatcher(),
-                    data.getFloat(WatutNetworking.NBTDataItemTransferFromX),
-                    data.getFloat(WatutNetworking.NBTDataItemTransferFromY),
-                    data.getFloat(WatutNetworking.NBTDataItemTransferFromZ),
-                    data.getFloat(WatutNetworking.NBTDataItemTransferToX),
-                    data.getFloat(WatutNetworking.NBTDataItemTransferToY),
-                    data.getFloat(WatutNetworking.NBTDataItemTransferToZ));
+                    data.getFloat(WatutNetworking.NBTDataItemTransferFromX).orElse(0f),
+                    data.getFloat(WatutNetworking.NBTDataItemTransferFromY).orElse(0f),
+                    data.getFloat(WatutNetworking.NBTDataItemTransferFromZ).orElse(0f),
+                    data.getFloat(WatutNetworking.NBTDataItemTransferToX).orElse(0f),
+                    data.getFloat(WatutNetworking.NBTDataItemTransferToY).orElse(0f),
+                    data.getFloat(WatutNetworking.NBTDataItemTransferToZ).orElse(0f));
             //Minecraft.getInstance().particleEngine.add(particleItem);
             getParticleEngine().add(particleItem);
 

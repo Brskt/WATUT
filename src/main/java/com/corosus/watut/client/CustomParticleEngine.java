@@ -13,9 +13,8 @@ import net.minecraft.Util;
 import net.minecraft.client.Camera;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.particle.*;
-import net.minecraft.client.renderer.CoreShaders;
-import net.minecraft.client.renderer.LightTexture;
 import net.minecraft.client.renderer.MultiBufferSource;
+import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.texture.SpriteLoader;
 import net.minecraft.client.renderer.texture.TextureAtlas;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
@@ -255,17 +254,8 @@ public class CustomParticleEngine implements PreparableReloadListener {
       }
    }
 
-   @Deprecated
-   public void render(PoseStack p_107337_, MultiBufferSource.BufferSource p_107338_, LightTexture p_107339_, Camera p_107340_, float p_107341_) {
-       render(p_107337_, p_107338_, p_107339_, p_107340_, p_107341_);
-   }
-
-   public void render(LightTexture lightTexture, Camera camera, float partialTick) {
-      if (lightTexture != null) lightTexture.turnOnLightLayer();
-      RenderSystem.enableDepthTest();
-      //TODO porting: is this even needed with the particle render order fix???
-      RenderSystem.activeTexture(org.lwjgl.opengl.GL13.GL_TEXTURE2);
-      RenderSystem.activeTexture(org.lwjgl.opengl.GL13.GL_TEXTURE0);
+   public void render(Camera camera, float partialTick, MultiBufferSource.BufferSource bufferSource) {
+      // Depth testing is now managed by RenderPipeline in 1.21.5
 
       /**
        * ParticleItem using special item/terrain pickup breaks particle render state so we just make sure to render it last
@@ -277,15 +267,13 @@ public class CustomParticleEngine implements PreparableReloadListener {
        *
        * If I switch to using vanilla particle renderer, my ParticleItem renders for forge, but not for fabric, didn't dig into why.
        */
-      this.render(lightTexture, camera, partialTick, false);
-      this.render(lightTexture, camera, partialTick, true);
+      this.render(camera, partialTick, bufferSource, false);
+      this.render(camera, partialTick, bufferSource, true);
 
-      RenderSystem.depthMask(true);
-      RenderSystem.disableBlend();
-      if (lightTexture != null) lightTexture.turnOffLightLayer();
+      bufferSource.endBatch();
    }
 
-   public void render(LightTexture lightTexture, Camera camera, float partialTick, boolean pickupParticleMode) {
+   public void render(Camera camera, float partialTick, MultiBufferSource.BufferSource bufferSource, boolean pickupParticleMode) {
 
       /**
        * ParticleItem using special item/terrain pickup breaks particle render state so we just make sure to render it last
@@ -306,29 +294,20 @@ public class CustomParticleEngine implements PreparableReloadListener {
          }
          Queue<ParticleRotating> queue = this.particles.get(particlerendertype);
          if (queue != null && !queue.isEmpty()) {
-            RenderSystem.setShader(CoreShaders.PARTICLE);
-            Tesselator tesselator = Tesselator.getInstance();
-            BufferBuilder bufferbuilder = particlerendertype.begin(tesselator, this.textureManager);
-            if (bufferbuilder != null) {
-               for (Particle particle : queue) {
-                  //if (frustum != null && !frustum.isVisible(particle.getRenderBoundingBox(partialTick))) continue;
-                  try {
-                     particle.render(bufferbuilder, camera, partialTick);
-                  } catch (Throwable throwable) {
-                     CrashReport crashreport = CrashReport.forThrowable(throwable, "Rendering Particle");
-                     CrashReportCategory crashreportcategory = crashreport.addCategory("Particle being rendered");
-                     crashreportcategory.setDetail("Particle", particle::toString);
-                     crashreportcategory.setDetail("Particle Type", particlerendertype::toString);
-                     throw new ReportedException(crashreport);
-                  }
-               }
-
-               MeshData meshdata = bufferbuilder.build();
-               if (meshdata != null) {
-                  BufferUploader.drawWithShader(meshdata);
+            RenderType renderType = particlerendertype.getRenderType();
+            VertexConsumer vertexConsumer = bufferSource.getBuffer(renderType);
+            for (Particle particle : queue) {
+               //if (frustum != null && !frustum.isVisible(particle.getRenderBoundingBox(partialTick))) continue;
+               try {
+                  particle.render(vertexConsumer, camera, partialTick);
+               } catch (Throwable throwable) {
+                  CrashReport crashreport = CrashReport.forThrowable(throwable, "Rendering Particle");
+                  CrashReportCategory crashreportcategory = crashreport.addCategory("Particle being rendered");
+                  crashreportcategory.setDetail("Particle", particle::toString);
+                  crashreportcategory.setDetail("Particle Type", particlerendertype::toString);
+                  throw new ReportedException(crashreport);
                }
             }
-            RenderSystem.enableCull();
          }
       }
    }

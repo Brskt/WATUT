@@ -1,26 +1,33 @@
 package com.corosus.watut.client.screen;
 
-import com.corosus.watut.PlayerStatusManagerClient;
+import com.corosus.watut.WatutMod;
 import com.corosus.watut.client.ParticleRenderTypeOld;
-import com.mojang.blaze3d.systems.RenderSystem;
-import com.mojang.blaze3d.vertex.BufferBuilder;
-import com.mojang.blaze3d.vertex.DefaultVertexFormat;
-import com.mojang.blaze3d.vertex.Tesselator;
-import com.mojang.blaze3d.vertex.VertexFormat;
+import com.mojang.blaze3d.pipeline.BlendFunction;
+import com.mojang.blaze3d.pipeline.RenderPipeline;
+import com.mojang.blaze3d.platform.DepthTestFunction;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.client.particle.ParticleRenderType;
-import net.minecraft.client.renderer.CoreShaders;
-import net.minecraft.client.renderer.GameRenderer;
+import net.minecraft.client.renderer.RenderPipelines;
+import net.minecraft.client.renderer.RenderStateShard;
+import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.texture.DynamicTexture;
-import net.minecraft.client.renderer.texture.TextureManager;
-import net.minecraft.world.level.Level;
-import org.jetbrains.annotations.Nullable;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.util.TriState;
 import org.lwjgl.system.MemoryUtil;
 
 import java.nio.ByteBuffer;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public class ScreenData {
+
+    private static final RenderPipeline TRANSLUCENT_PARTICLE_NO_CULL = RenderPipelines.register(
+            RenderPipeline.builder(RenderPipelines.PARTICLE_SNIPPET)
+                    .withLocation("pipeline/watut_translucent_particle_no_cull")
+                    .withBlend(BlendFunction.TRANSLUCENT)
+                    .withCull(false)
+                    .withDepthTestFunction(DepthTestFunction.NO_DEPTH_TEST)
+                    .withDepthWrite(false)
+                    .build());
 
     private volatile ByteBuffer texturePixelData = null;
     private volatile ByteBuffer decompressionBuffer = null;
@@ -48,25 +55,21 @@ public class ScreenData {
     //since gui states are kinda old system and require specifically adding support for a screen, we use this instead to track true differences now
     private Screen lastScreen;
 
+    private ResourceLocation textureLocation = null;
+    private RenderType cachedRenderType = null;
+
     public static boolean testing = false;
 
     public void initClient() {
 
         this.particleRenderType = new ParticleRenderTypeOld() {
-            public @Nullable BufferBuilder begin(Tesselator tesselator, TextureManager textureManager) {
-                //oculus breaks our shader for some reason
-                if (RenderHelper.isShadersEnabled() || testing) {
-                    RenderSystem.setShader(CoreShaders.PARTICLE);
-                } else {
-                    RenderSystem.setShader(PlayerStatusManagerClient.particle.getProgram());
+            @Override
+            public RenderType getRenderType() {
+                if (cachedRenderType != null) {
+                    return cachedRenderType;
                 }
-                RenderSystem.setShaderTexture(0, getImage().getId());
-
-                RenderSystem.depthMask(true);
-                RenderSystem.enableBlend();
-                RenderSystem.defaultBlendFunc();
-                RenderSystem.disableCull();
-                return tesselator.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.PARTICLE);
+                // Fallback when texture not yet registered
+                return RenderType.translucentParticle(net.minecraft.client.renderer.texture.TextureAtlas.LOCATION_PARTICLES);
             }
 
             public String toString() {
@@ -76,6 +79,28 @@ public class ScreenData {
 
         //WatutMod.instance().addParticleRenderType(particleRenderType);
 
+    }
+
+    public void registerTexture() {
+        if (image != null) {
+            if (textureLocation == null) {
+                textureLocation = ResourceLocation.fromNamespaceAndPath(WatutMod.MODID, "dynamic/screen_" + System.identityHashCode(this));
+            }
+            Minecraft.getInstance().getTextureManager().register(textureLocation, image);
+            cachedRenderType = RenderType.create(
+                    "watut_translucent_particle_no_cull",
+                    1536,
+                    TRANSLUCENT_PARTICLE_NO_CULL,
+                    RenderType.CompositeState.builder()
+                            .setTextureState(new RenderStateShard.TextureStateShard(textureLocation, TriState.FALSE, false))
+                            .setOutputState(RenderStateShard.PARTICLES_TARGET)
+                            .setLightmapState(RenderStateShard.LIGHTMAP)
+                            .createCompositeState(false));
+        }
+    }
+
+    public void invalidateCachedRenderType() {
+        cachedRenderType = null;
     }
 
     public ByteBuffer getTexturePixelData() {

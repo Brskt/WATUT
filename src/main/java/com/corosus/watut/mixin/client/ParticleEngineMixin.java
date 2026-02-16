@@ -20,7 +20,7 @@ public abstract class ParticleEngineMixin {
 
     @Inject(method = "render(Lnet/minecraft/client/Camera;FLnet/minecraft/client/renderer/MultiBufferSource$BufferSource;Lnet/minecraft/client/renderer/culling/Frustum;Ljava/util/function/Predicate;)V", at = @At("TAIL"), remap = false)
     private void render(Camera camera, float partialTick, MultiBufferSource.BufferSource bufferSource, Frustum frustum, Predicate<ParticleRenderType> renderTypePredicate, CallbackInfo ci) {
-        PlayerStatusManagerClient.getParticleEngine().render(Minecraft.getInstance().gameRenderer.lightTexture(), camera, partialTick);
+        PlayerStatusManagerClient.getParticleEngine().render(camera, partialTick, bufferSource);
     }
 
     @Inject(method = "tick", at = @At("TAIL"))

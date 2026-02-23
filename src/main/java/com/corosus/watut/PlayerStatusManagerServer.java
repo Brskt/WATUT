@@ -7,6 +7,7 @@ import com.corosus.watut.config.ConfigServerSyncHelper;
 import com.mojang.datafixers.util.Pair;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.NbtOps;
 import net.minecraft.nbt.Tag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
@@ -147,7 +148,8 @@ public class PlayerStatusManagerServer extends PlayerStatusManager {
         boolean singleplayerTesting = false;
         if (singleplayerTesting || level.getNearestPlayer(fromX, fromY, fromZ, ConfigServerControlledSyncedToClient.distanceRequiredToShowGUIInfo, (entity) -> entity != player) != null) {
             CompoundTag data = new CompoundTag();
-            Tag itemData = itemStack.save(level.registryAccess());
+            Tag itemData = ItemStack.CODEC.encodeStart(
+                level.registryAccess().createSerializationContext(NbtOps.INSTANCE), itemStack).getOrThrow();
             /**
              * If the itemstack contains too much data, play it safe and convert it to a simple version, might cause incorrect appearance issues
              */
@@ -155,7 +157,8 @@ public class PlayerStatusManagerServer extends PlayerStatusManager {
             if (itemData.sizeInBytes() > 31000) {
                 CULog.dbg("itemstack too large for sending, using simple version");
                 itemStack = getSimpleItemStack(itemStack);
-                itemData = itemStack.save(level.registryAccess());
+                itemData = ItemStack.CODEC.encodeStart(
+                    level.registryAccess().createSerializationContext(NbtOps.INSTANCE), itemStack).getOrThrow();
             }
             data.put(WatutNetworking.NBTDataItemTransferItemStack, itemData);
             data.putFloat(WatutNetworking.NBTDataItemTransferFromX, fromX);

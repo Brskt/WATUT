@@ -20,11 +20,8 @@ public class ShaderProgramBlur {
                 .withVertexShader(shaderLoc)
                 .withFragmentShader(shaderLoc)
                 .withSampler("InSampler")
-                .withUniform("resolution", UniformType.VEC2)
-                .withUniform("radius", UniformType.FLOAT)
-                .withUniform("blurLevel", UniformType.FLOAT)
-                .withUniform("InCropMin", UniformType.VEC2)
-                .withUniform("InCropMax", UniformType.VEC2)
+                .withUniform("BlurParams", UniformType.UNIFORM_BUFFER)
+                .withUniform("SamplerInfo", UniformType.UNIFORM_BUFFER)
                 .build());
 
     }

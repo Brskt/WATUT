@@ -2,11 +2,13 @@
 
 uniform sampler2D InSampler;
 
-uniform vec4 ColorModulator;
-uniform vec2 resolution;
-uniform float radius;
-uniform vec2 InCropMin;
-uniform vec2 InCropMax;
+layout(std140) uniform BlurParams {
+    vec2 resolution;
+    float radius;
+    float blurLevel;
+    vec2 InCropMin;
+    vec2 InCropMax;
+};
 
 in vec2 texCoord0;
 
@@ -53,6 +55,9 @@ void main() {
         col.a = min(col.a, 1 - ((dist - cutoff) / cutoff2));
     }
     //col.a = 0.32;
+    if (col.a <= 0.0 && dot(col.rgb, vec3(1.0)) > 0.0) {
+        col.a = 1.0;
+    }
     if (col.a <= 0.0) {
         discard;
     }

@@ -14,7 +14,6 @@ import net.minecraft.client.renderer.RenderStateShard;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.texture.TextureAtlas;
 import net.minecraft.util.Mth;
-import net.minecraft.util.TriState;
 import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.Nullable;
 import org.joml.Quaternionf;
@@ -72,7 +71,7 @@ public abstract class ParticleRotating extends TextureSheetParticle {
             1536,
             TRANSLUCENT_PARTICLE_NO_CULL_PIPELINE,
             RenderType.CompositeState.builder()
-                    .setTextureState(new RenderStateShard.TextureStateShard(TextureAtlas.LOCATION_PARTICLES, TriState.FALSE, false))
+                    .setTextureState(new RenderStateShard.TextureStateShard(TextureAtlas.LOCATION_PARTICLES, false))
                     .setOutputState(RenderStateShard.PARTICLES_TARGET)
                     .setLightmapState(RenderStateShard.LIGHTMAP)
                     .createCompositeState(false));
@@ -93,7 +92,7 @@ public abstract class ParticleRotating extends TextureSheetParticle {
             1536,
             TRANSLUCENT_PARTICLE_NO_CULL_NO_DEPTH_PIPELINE,
             RenderType.CompositeState.builder()
-                    .setTextureState(new RenderStateShard.TextureStateShard(TextureAtlas.LOCATION_BLOCKS, TriState.FALSE, false))
+                    .setTextureState(new RenderStateShard.TextureStateShard(TextureAtlas.LOCATION_BLOCKS, false))
                     .setOutputState(RenderStateShard.PARTICLES_TARGET)
                     .setLightmapState(RenderStateShard.LIGHTMAP)
                     .createCompositeState(false));

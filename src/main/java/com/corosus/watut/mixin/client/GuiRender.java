@@ -18,7 +18,7 @@ public abstract class GuiRender {
 
     @Inject(method = "render", at = @At("TAIL"))
     private void render(GuiGraphics guiGraphics, DeltaTracker deltaTracker, CallbackInfo ci) {
-        WatutMod.getPlayerStatusManagerClient().onGuiRender();
+        WatutMod.getPlayerStatusManagerClient().onGuiRender(guiGraphics);
         RenderHelper.guiRender(guiGraphics);
     }
 }

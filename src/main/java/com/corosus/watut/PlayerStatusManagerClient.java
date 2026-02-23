@@ -20,10 +20,12 @@ import net.minecraft.client.model.PlayerModel;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.PlayerInfo;
 import net.minecraft.client.player.AbstractClientPlayer;
+import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.client.renderer.entity.LivingEntityRenderer;
 import net.minecraft.client.renderer.entity.state.PlayerRenderState;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.NbtOps;
 import net.minecraft.server.packs.resources.ReloadableResourceManager;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
@@ -41,7 +43,6 @@ import java.nio.ByteBuffer;
 import java.util.*;
 
 public class PlayerStatusManagerClient extends PlayerStatusManager {
-
     //selfPlayer statuses are important, a use case: tracking things to send packets for locally,
     //then we allow for packet to be sent to self as well, where we also use the lookup to then compare previous state so we can correctly setup pose for self as well as others
     //local use case:
@@ -357,7 +358,7 @@ public class PlayerStatusManagerClient extends PlayerStatusManager {
         if (mc.screen instanceof ChatScreen chatScreen) {
             chatText = chatScreen.input.getValue();
         } else if (mc.screen instanceof BookEditScreen bookEditScreen) {
-            chatText = bookEditScreen.pageEdit.getMessageFn.get();
+            chatText = bookEditScreen.page.getValue();
         } else if (mc.screen instanceof AbstractSignEditScreen abstractSignEditScreen) {
             chatText = abstractSignEditScreen.signField.getMessageFn.get();
         } else if (mc.screen instanceof AbstractCommandBlockEditScreen abstractCommandBlockEditScreen) {
@@ -586,14 +587,12 @@ public class PlayerStatusManagerClient extends PlayerStatusManager {
         return false;
     }
 
-    public void onGuiRender() {
+    public void onGuiRender(GuiGraphics guigraphics) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.screen instanceof ChatScreen && mc.getConnection() != null && ConfigClient.screenTypingVisible && ConfigServerControlledSyncedToClient.screenTypingVisible) {
             ChatScreen chat = (ChatScreen) mc.screen;
-            GuiGraphics guigraphics = new GuiGraphics(mc, mc.renderBuffers().bufferSource());
             int height = chat.height + 26;
             guigraphics.drawString(mc.font, WatutMod.getPlayerStatusManagerClient().getTypingPlayers(), 2 + ConfigClient.screenTypingRelativePosition_X, height - 50 + ConfigClient.screenTypingRelativePosition_Y, 16777215);
-            guigraphics.flush();
         }
     }
 
@@ -813,6 +812,7 @@ public class PlayerStatusManagerClient extends PlayerStatusManager {
                     /*} else {
                         Minecraft.getInstance().particleEngine.add(particle);
                     }*/
+                } else {
                 }
             } else {
 
@@ -891,13 +891,13 @@ public class PlayerStatusManagerClient extends PlayerStatusManager {
         if (Minecraft.getInstance().particleEngine == null || pPlayerInfo == null || pPlayerInfo.getProfile() == null || !ConfigClient.showIdleStatesInPlayerList || !ConfigServerControlledSyncedToClient.showIdleStatesInPlayerList) return false;
         PlayerStatus playerStatus = getStatus(pPlayerInfo.getProfile().getId());
         if (playerStatus.isIdle()) {
-            pGuiGraphics.pose().pushPose();
-            pGuiGraphics.pose().translate(0.0F, 0.0F, 101F);
+            pGuiGraphics.pose().pushMatrix();
+            pGuiGraphics.pose().translate(0.0F, 0.0F);
             TextureAtlasSprite sprite = ParticleRegistry.idle.getSprite();
             int x = (int) (Minecraft.getInstance().particleEngine.textureAtlas.width * sprite.getU0());
             int y = (int) (Minecraft.getInstance().particleEngine.textureAtlas.height * sprite.getV0());
-            pGuiGraphics.blit(net.minecraft.client.renderer.RenderType::guiTextured, sprite.atlasLocation(), p_282801_ + p_281809_ - 11, pY, x, y, 10, 8, Minecraft.getInstance().particleEngine.textureAtlas.width, Minecraft.getInstance().particleEngine.textureAtlas.height);
-            pGuiGraphics.pose().popPose();
+            pGuiGraphics.blit(RenderPipelines.GUI_TEXTURED, sprite.atlasLocation(), p_282801_ + p_281809_ - 11, pY, x, y, 10, 8, Minecraft.getInstance().particleEngine.textureAtlas.width, Minecraft.getInstance().particleEngine.textureAtlas.height);
+            pGuiGraphics.pose().popMatrix();
             return true;
         }
         return false;
@@ -1457,7 +1457,8 @@ public class PlayerStatusManagerClient extends PlayerStatusManager {
         if (data.contains(WatutNetworking.NBTDataItemTransferItemStack)) {
 
             ItemStack itemStack = data.getCompound(WatutNetworking.NBTDataItemTransferItemStack)
-                    .flatMap(tag -> ItemStack.parse(Minecraft.getInstance().level.registryAccess(), tag))
+                    .<ItemStack>flatMap(tag -> ItemStack.CODEC.parse(
+                        Minecraft.getInstance().level.registryAccess().createSerializationContext(NbtOps.INSTANCE), tag).result())
                     .orElse(ItemStack.EMPTY);
             ParticleItem particleItem = new ParticleItem(Minecraft.getInstance().level, 1, itemStack,
                     Minecraft.getInstance().renderBuffers(),

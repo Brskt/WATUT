@@ -10,12 +10,15 @@ import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.systems.CommandEncoder;
 import com.mojang.blaze3d.systems.RenderPass;
 import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.blaze3d.buffers.Std140Builder;
 import com.mojang.blaze3d.textures.GpuTexture;
+import com.mojang.blaze3d.textures.GpuTextureView;
 import com.mojang.blaze3d.vertex.VertexFormat;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.resources.ResourceLocation;
 import org.joml.Matrix4f;
+import org.lwjgl.system.MemoryStack;
 
 import java.util.OptionalInt;
 
@@ -39,6 +42,9 @@ public class ScreenParticleRenderer {
     public int widthScaledDown = defaultWidthScaledDown;
     public int heightScaledDown = defaultHeightScaledDown;
     public boolean needsInit = true;
+
+    // Set temporarily during captureScreenAfterGuiRender to override the input source for blur passes
+    private GpuTextureView captureSourceOverrideView = null;
 
     private static ScreenParticleRenderer instance;
 
@@ -145,116 +151,196 @@ public class ScreenParticleRenderer {
         this.mainRenderTarget = mainRenderTarget;
     }
 
+    public void setCaptureSourceOverride(GpuTextureView sourceView) {
+        this.captureSourceOverrideView = sourceView;
+    }
+
+    public void clearCaptureSourceOverride() {
+        this.captureSourceOverrideView = null;
+    }
+
+    private GpuTextureView resolveCaptureInputView() {
+        if (captureSourceOverrideView != null) {
+            return captureSourceOverrideView;
+        }
+        if (mainRenderTarget == null) {
+            return null;
+        }
+        return mainRenderTarget.getColorTextureView();
+    }
+
     public void innerBlitCustomShader(int p_281399_, int p_283222_, int p_283615_, int p_283430_, int p_281729_, float minU, float maxU, float minV, float maxV) {
-        GpuTexture inputTexture = mainRenderTarget.getColorTexture();
-        GpuTexture outputTexture = mainRenderTargetScaledDown.getColorTexture();
-        if (inputTexture == null || outputTexture == null) return;
+        GpuTextureView inputView = resolveCaptureInputView();
+        GpuTextureView outputView = mainRenderTargetScaledDown.getColorTextureView();
+        if (inputView == null || outputView == null) return;
 
         RenderSystem.AutoStorageIndexBuffer seqBuf = RenderSystem.getSequentialBuffer(VertexFormat.Mode.QUADS);
         GpuBuffer indexBuffer = seqBuf.getBuffer(6);
         GpuBuffer quadBuffer = RenderSystem.getQuadVertexBuffer();
 
-        RenderSystem.backupProjectionMatrix();
-        RenderSystem.setProjectionMatrix(new Matrix4f().setOrtho(0.0f, widthScaledDown, 0.0f, heightScaledDown, 0.1f, 1000.0f), ProjectionType.ORTHOGRAPHIC);
-        try (RenderPass renderPass = RenderSystem.getDevice().createCommandEncoder()
-                .createRenderPass(outputTexture, OptionalInt.of(0))) {
-            renderPass.setPipeline(PlayerStatusManagerClient.positionTexBlur.getPipeline());
-            renderPass.bindSampler("InSampler", inputTexture);
-            renderPass.setUniform("resolution", (float)widthScaledDown, (float)heightScaledDown);
-            renderPass.setUniform("radius", 0f);
-            renderPass.setUniform("InCropMin", minU, minV);
-            renderPass.setUniform("InCropMax", maxU, maxV);
-            renderPass.setUniform("OutSize", (float)widthScaledDown, (float)heightScaledDown);
-            renderPass.setVertexBuffer(0, quadBuffer);
-            renderPass.setIndexBuffer(indexBuffer, seqBuf.type());
-            renderPass.drawIndexed(0, 6);
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            GpuBuffer projBuffer = RenderSystem.getDevice().createBuffer(
+                () -> "watut projection", 128,
+                Std140Builder.onStack(stack, RenderSystem.PROJECTION_MATRIX_UBO_SIZE)
+                    .putMat4f(new Matrix4f().setOrtho(0.0f, widthScaledDown, 0.0f, heightScaledDown, 0.1f, 1000.0f))
+                    .get()
+            );
+            GpuBuffer blurParamsBuffer = RenderSystem.getDevice().createBuffer(
+                () -> "watut BlurParams", 128,
+                Std140Builder.onStack(stack, 32)
+                    .putVec2((float) widthScaledDown, (float) heightScaledDown)
+                    .putFloat(0f)
+                    .putFloat(0f)
+                    .putVec2(minU, minV)
+                    .putVec2(maxU, maxV)
+                    .get()
+            );
+            GpuBuffer samplerInfoBuffer = RenderSystem.getDevice().createBuffer(
+                () -> "watut SamplerInfo", 128,
+                Std140Builder.onStack(stack, 16)
+                    .putVec2((float) widthScaledDown, (float) heightScaledDown)
+                    .putVec2((float) inputView.getWidth(0), (float) inputView.getHeight(0))
+                    .get()
+            );
+
+            RenderSystem.backupProjectionMatrix();
+            RenderSystem.setProjectionMatrix(projBuffer.slice(), ProjectionType.ORTHOGRAPHIC);
+            try (RenderPass renderPass = RenderSystem.getDevice().createCommandEncoder()
+                    .createRenderPass(() -> "WATUT blit", outputView, OptionalInt.of(0))) {
+                renderPass.setPipeline(PlayerStatusManagerClient.positionTexBlur.getPipeline());
+                RenderSystem.bindDefaultUniforms(renderPass);
+                renderPass.setUniform("BlurParams", blurParamsBuffer);
+                renderPass.setUniform("SamplerInfo", samplerInfoBuffer);
+                renderPass.bindSampler("InSampler", inputView);
+                renderPass.setVertexBuffer(0, quadBuffer);
+                renderPass.setIndexBuffer(indexBuffer, seqBuf.type());
+                renderPass.drawIndexed(0, 0, 6, 1);
+            }
+            RenderSystem.restoreProjectionMatrix();
+
+            projBuffer.close();
+            blurParamsBuffer.close();
+            samplerInfoBuffer.close();
         }
-        RenderSystem.restoreProjectionMatrix();
     }
 
     public void innerBlitCustomShader2(int textureID, int p_281399_, int p_283222_, int p_283615_, int p_283430_, int p_281729_, float minU, float maxU, float minV, float maxV) {
-        GpuTexture inputTexture = mainRenderTarget.getColorTexture();
-        GpuTexture outputTexture = mainRenderTargetScaledDown.getColorTexture();
-        if (inputTexture == null || outputTexture == null) return;
-
-        RenderSystem.AutoStorageIndexBuffer seqBuf = RenderSystem.getSequentialBuffer(VertexFormat.Mode.QUADS);
-        GpuBuffer indexBuffer = seqBuf.getBuffer(6);
-        GpuBuffer quadBuffer = RenderSystem.getQuadVertexBuffer();
-
-        RenderSystem.backupProjectionMatrix();
-        RenderSystem.setProjectionMatrix(new Matrix4f().setOrtho(0.0f, widthScaledDown, 0.0f, heightScaledDown, 0.1f, 1000.0f), ProjectionType.ORTHOGRAPHIC);
-        try (RenderPass renderPass = RenderSystem.getDevice().createCommandEncoder()
-                .createRenderPass(outputTexture, OptionalInt.of(0))) {
-            renderPass.setPipeline(PlayerStatusManagerClient.positionTexBlur.getPipeline());
-            renderPass.bindSampler("InSampler", inputTexture);
-            renderPass.setUniform("resolution", (float)widthScaledDown, (float)heightScaledDown);
-            renderPass.setUniform("radius", 0f);
-            renderPass.setUniform("InCropMin", minU, minV);
-            renderPass.setUniform("InCropMax", maxU, maxV);
-            renderPass.setUniform("OutSize", (float)widthScaledDown, (float)heightScaledDown);
-            renderPass.setVertexBuffer(0, quadBuffer);
-            renderPass.setIndexBuffer(indexBuffer, seqBuf.type());
-            renderPass.drawIndexed(0, 6);
-        }
-        RenderSystem.restoreProjectionMatrix();
+        // Legacy entrypoint kept for compatibility; textureID is ignored in the 1.21.6 GPU API path.
+        innerBlitCustomShader(p_281399_, p_283222_, p_283615_, p_283430_, p_281729_, minU, maxU, minV, maxV);
     }
 
     public void innerBlitCustomShaderHorizontal(int p_281399_, int p_283222_, int p_283615_, int p_283430_, int p_281729_, float minU, float maxU, float minV, float maxV) {
-        GpuTexture inputTexture;
-        if (RenderHelper.xaeroWorldMapTextureID != -1) {
-            //TODO: xaero integration needs rework for 1.21.5 GPU abstraction
-            inputTexture = mainRenderTarget.getColorTexture();
-        } else {
-            inputTexture = mainRenderTarget.getColorTexture();
-        }
-        GpuTexture outputTexture = mainRenderTargetScaledDown.getColorTexture();
-        if (inputTexture == null || outputTexture == null) return;
+        GpuTextureView inputView = resolveCaptureInputView();
+        GpuTextureView outputView = mainRenderTargetScaledDown.getColorTextureView();
+        if (inputView == null || outputView == null) return;
 
         RenderSystem.AutoStorageIndexBuffer seqBuf = RenderSystem.getSequentialBuffer(VertexFormat.Mode.QUADS);
         GpuBuffer indexBuffer = seqBuf.getBuffer(6);
         GpuBuffer quadBuffer = RenderSystem.getQuadVertexBuffer();
 
-        RenderSystem.backupProjectionMatrix();
-        RenderSystem.setProjectionMatrix(new Matrix4f().setOrtho(0.0f, widthScaledDown, 0.0f, heightScaledDown, 0.1f, 1000.0f), ProjectionType.ORTHOGRAPHIC);
-        try (RenderPass renderPass = RenderSystem.getDevice().createCommandEncoder()
-                .createRenderPass(outputTexture, OptionalInt.of(0))) {
-            renderPass.setPipeline(PlayerStatusManagerClient.positionTexBlurHorizontal.getPipeline());
-            renderPass.bindSampler("InSampler", inputTexture);
-            renderPass.setUniform("blurLevel", (float)(RenderHelper.xaeroWorldMapTextureID != -1 ? 0 : ConfigServerControlledSyncedToClient.dynamicGuiBlurLevel));
-            renderPass.setUniform("InCropMin", minU, minV);
-            renderPass.setUniform("InCropMax", maxU, maxV);
-            renderPass.setUniform("OutSize", (float)widthScaledDown, (float)heightScaledDown);
-            renderPass.setVertexBuffer(0, quadBuffer);
-            renderPass.setIndexBuffer(indexBuffer, seqBuf.type());
-            renderPass.drawIndexed(0, 6);
+        float blurLevel = (float)(RenderHelper.xaeroWorldMapTextureID != -1 ? 0 : ConfigServerControlledSyncedToClient.dynamicGuiBlurLevel);
+
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            GpuBuffer projBuffer = RenderSystem.getDevice().createBuffer(
+                () -> "watut projection", 128,
+                Std140Builder.onStack(stack, RenderSystem.PROJECTION_MATRIX_UBO_SIZE)
+                    .putMat4f(new Matrix4f().setOrtho(0.0f, widthScaledDown, 0.0f, heightScaledDown, 0.1f, 1000.0f))
+                    .get()
+            );
+            GpuBuffer blurParamsBuffer = RenderSystem.getDevice().createBuffer(
+                () -> "watut BlurParams", 128,
+                Std140Builder.onStack(stack, 32)
+                    .putVec2((float) widthScaledDown, (float) heightScaledDown)
+                    .putFloat(0f)
+                    .putFloat(blurLevel)
+                    .putVec2(minU, minV)
+                    .putVec2(maxU, maxV)
+                    .get()
+            );
+            GpuBuffer samplerInfoBuffer = RenderSystem.getDevice().createBuffer(
+                () -> "watut SamplerInfo", 128,
+                Std140Builder.onStack(stack, 16)
+                    .putVec2((float) widthScaledDown, (float) heightScaledDown)
+                    .putVec2((float) inputView.getWidth(0), (float) inputView.getHeight(0))
+                    .get()
+            );
+
+            RenderSystem.backupProjectionMatrix();
+            RenderSystem.setProjectionMatrix(projBuffer.slice(), ProjectionType.ORTHOGRAPHIC);
+            try (RenderPass renderPass = RenderSystem.getDevice().createCommandEncoder()
+                    .createRenderPass(() -> "WATUT blur horizontal", outputView, OptionalInt.of(0))) {
+                renderPass.setPipeline(PlayerStatusManagerClient.positionTexBlurHorizontal.getPipeline());
+                RenderSystem.bindDefaultUniforms(renderPass);
+                renderPass.setUniform("BlurParams", blurParamsBuffer);
+                renderPass.setUniform("SamplerInfo", samplerInfoBuffer);
+                renderPass.bindSampler("InSampler", inputView);
+                renderPass.setVertexBuffer(0, quadBuffer);
+                renderPass.setIndexBuffer(indexBuffer, seqBuf.type());
+                renderPass.drawIndexed(0, 0, 6, 1);
+            }
+            RenderSystem.restoreProjectionMatrix();
+
+            projBuffer.close();
+            blurParamsBuffer.close();
+            samplerInfoBuffer.close();
         }
-        RenderSystem.restoreProjectionMatrix();
     }
 
     public void innerBlitCustomShaderVertical(int p_281399_, int p_283222_, int p_283615_, int p_283430_, int p_281729_, float p_283247_, float p_282598_, float p_282883_, float p_283017_) {
-        GpuTexture inputTexture = mainRenderTargetScaledDown.getColorTexture();
-        GpuTexture outputTexture = mainRenderTargetScaledDown.getColorTexture();
-        if (inputTexture == null || outputTexture == null) return;
+        GpuTextureView targetView = mainRenderTargetScaledDown.getColorTextureView();
+        if (targetView == null) return;
 
         RenderSystem.AutoStorageIndexBuffer seqBuf = RenderSystem.getSequentialBuffer(VertexFormat.Mode.QUADS);
         GpuBuffer indexBuffer = seqBuf.getBuffer(6);
         GpuBuffer quadBuffer = RenderSystem.getQuadVertexBuffer();
 
-        RenderSystem.backupProjectionMatrix();
-        RenderSystem.setProjectionMatrix(new Matrix4f().setOrtho(0.0f, widthScaledDown, 0.0f, heightScaledDown, 0.1f, 1000.0f), ProjectionType.ORTHOGRAPHIC);
-        try (RenderPass renderPass = RenderSystem.getDevice().createCommandEncoder()
-                .createRenderPass(outputTexture, OptionalInt.empty())) {
-            renderPass.setPipeline(PlayerStatusManagerClient.positionTexBlurVertical.getPipeline());
-            renderPass.bindSampler("InSampler", inputTexture);
-            renderPass.setUniform("resolution", (float)widthScaledDown, (float)heightScaledDown);
-            renderPass.setUniform("radius", (float) ConfigServerControlledSyncedToClient.dynamicGuiSizeRadiusInPixelsToShow);
-            renderPass.setUniform("blurLevel", (float)(RenderHelper.xaeroWorldMapTextureID != -1 ? 0 : ConfigServerControlledSyncedToClient.dynamicGuiBlurLevel));
-            renderPass.setUniform("OutSize", (float)widthScaledDown, (float)heightScaledDown);
-            renderPass.setVertexBuffer(0, quadBuffer);
-            renderPass.setIndexBuffer(indexBuffer, seqBuf.type());
-            renderPass.drawIndexed(0, 6);
+        float radius = (float) ConfigServerControlledSyncedToClient.dynamicGuiSizeRadiusInPixelsToShow;
+        float blurLevel = (float)(RenderHelper.xaeroWorldMapTextureID != -1 ? 0 : ConfigServerControlledSyncedToClient.dynamicGuiBlurLevel);
+
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            GpuBuffer projBuffer = RenderSystem.getDevice().createBuffer(
+                () -> "watut projection", 128,
+                Std140Builder.onStack(stack, RenderSystem.PROJECTION_MATRIX_UBO_SIZE)
+                    .putMat4f(new Matrix4f().setOrtho(0.0f, widthScaledDown, 0.0f, heightScaledDown, 0.1f, 1000.0f))
+                    .get()
+            );
+            GpuBuffer blurParamsBuffer = RenderSystem.getDevice().createBuffer(
+                () -> "watut BlurParams", 128,
+                Std140Builder.onStack(stack, 32)
+                    .putVec2((float) widthScaledDown, (float) heightScaledDown)
+                    .putFloat(radius)
+                    .putFloat(blurLevel)
+                    .putVec2(0f, 0f)
+                    .putVec2(1f, 1f)
+                    .get()
+            );
+            GpuBuffer samplerInfoBuffer = RenderSystem.getDevice().createBuffer(
+                () -> "watut SamplerInfo", 128,
+                Std140Builder.onStack(stack, 16)
+                    .putVec2((float) widthScaledDown, (float) heightScaledDown)
+                    .putVec2((float) targetView.getWidth(0), (float) targetView.getHeight(0))
+                    .get()
+            );
+
+            RenderSystem.backupProjectionMatrix();
+            RenderSystem.setProjectionMatrix(projBuffer.slice(), ProjectionType.ORTHOGRAPHIC);
+            try (RenderPass renderPass = RenderSystem.getDevice().createCommandEncoder()
+                    .createRenderPass(() -> "WATUT blur vertical", targetView, OptionalInt.empty())) {
+                renderPass.setPipeline(PlayerStatusManagerClient.positionTexBlurVertical.getPipeline());
+                RenderSystem.bindDefaultUniforms(renderPass);
+                renderPass.setUniform("BlurParams", blurParamsBuffer);
+                renderPass.setUniform("SamplerInfo", samplerInfoBuffer);
+                renderPass.bindSampler("InSampler", targetView);
+                renderPass.setVertexBuffer(0, quadBuffer);
+                renderPass.setIndexBuffer(indexBuffer, seqBuf.type());
+                renderPass.drawIndexed(0, 0, 6, 1);
+            }
+            RenderSystem.restoreProjectionMatrix();
+
+            projBuffer.close();
+            blurParamsBuffer.close();
+            samplerInfoBuffer.close();
         }
-        RenderSystem.restoreProjectionMatrix();
     }
 
     //copy of GuiGraphics.innerBlit with PoseStack added - now uses blit pipeline

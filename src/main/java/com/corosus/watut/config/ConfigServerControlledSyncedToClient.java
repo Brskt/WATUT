@@ -30,7 +30,7 @@ public class ConfigServerControlledSyncedToClient implements IConfigCategory {
     public static int dynamicGuiTickSendRateOfGUIUpdates = 10;
 
     @ConfigParams(comment = "If enabled, only sends the initial image of a players gui, does not constantly update after it's been opened.")
-    public static boolean dynamicGuiDontSendConstantGUIUpdates = true;
+    public static boolean dynamicGuiDontSendConstantGUIUpdates = false;
 
     @ConfigParams(min = 0, max = 2, comment = "Blur is used to prevent nasty aliasing/flicker artifacts at the cost of clarity")
     public static int dynamicGuiBlurLevel = 1;

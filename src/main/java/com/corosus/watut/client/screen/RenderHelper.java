@@ -9,19 +9,22 @@ import com.corosus.watut.config.ConfigClient;
 import com.corosus.watut.config.ConfigServerControlledSyncedToClient;
 import com.corosus.watut.mixin.client.NativeImageAccessor;
 import com.mojang.blaze3d.ProjectionType;
-import com.mojang.blaze3d.buffers.BufferType;
-import com.mojang.blaze3d.buffers.BufferUsage;
 import com.mojang.blaze3d.buffers.GpuBuffer;
+import com.mojang.blaze3d.buffers.Std140Builder;
+import com.mojang.blaze3d.systems.CommandEncoder;
 import com.mojang.blaze3d.platform.Window;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.textures.GpuTexture;
+import com.mojang.blaze3d.textures.GpuTextureView;
 import com.mojang.blaze3d.vertex.VertexSorting;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.render.state.GuiRenderState;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.renderer.texture.DynamicTexture;
 import net.minecraft.resources.ResourceLocation;
 import org.joml.Matrix4f;
+import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.MemoryUtil;
 
 import java.io.ByteArrayInputStream;
@@ -39,6 +42,14 @@ import java.util.zip.Inflater;
 public class RenderHelper {
 
     public static boolean performingOwnRender = false;
+    public static boolean pendingCapture = false;
+    public static boolean pendingGuiOnlyCapturePrepared = false;
+    private static final boolean FORCE_CAPTURE_ALPHA_OPAQUE = false;
+    private static final boolean RECONSTRUCT_ALPHA_FROM_COLOR_WHEN_ZERO = false;
+    // Toggle only if a backend/platform returns BGRA-like byte order during readback.
+    // Keep disabled unless colors are visibly swapped (red<->blue).
+    private static final boolean SWAP_CAPTURE_RED_BLUE = false;
+    private static GuiRenderState pendingScreenOnlyCaptureRenderState = null;
     public static ResourceLocation cursor = ResourceLocation.fromNamespaceAndPath(WatutMod.MODID, "textures/misc/mouse.png");
 
     //xaero minimap support (doesnt capture extra elements just terrain)
@@ -237,8 +248,8 @@ public class RenderHelper {
                 //hack into NativeImage to directly inject pixel data, working around its requirements for a PNG format parse
                 long nativeImagePixelMemoryAddress = ((NativeImageAccessor)((Object)screenData.getImage().getPixels())).pixels();
                 if (nativeImagePixelMemoryAddress != -1) {
-                    MemoryUtil.memCopy(MemoryUtil.memAddress(screenData.getDecompressionBuffer()), nativeImagePixelMemoryAddress,
-                            screenData.getWidth() * screenData.getHeight() * ScreenParticleRenderer.bytesPerPixel);
+                    copyReadbackPixelsToNativeImage(screenData.getDecompressionBuffer(), nativeImagePixelMemoryAddress,
+                            screenData.getWidth(), screenData.getHeight());
                 }
 
                 screenData.getImage().upload();
@@ -249,13 +260,24 @@ public class RenderHelper {
         }
     }
 
+    private static GpuBuffer vanillaProjectionBuffer = null;
+
     public static void bindVanillaRenderTargetAndSetupProjectionMatrix() {
         Window window = Minecraft.getInstance().getWindow();
         Matrix4f matrix4f = (new Matrix4f()).setOrtho(0.0F, (float)((double)window.getWidth() / window.getGuiScale()), (float)((double)window.getHeight() / window.getGuiScale()), 0.0F, 1000.0F, WatutMod.instance().getFarPlane());
-        RenderSystem.setProjectionMatrix(matrix4f, ProjectionType.ORTHOGRAPHIC);
 
-        // In 1.21.5, bindWrite() is no longer available on RenderTarget
-        // The main render target is implicitly the render destination
+        if (vanillaProjectionBuffer != null) {
+            vanillaProjectionBuffer.close();
+        }
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            vanillaProjectionBuffer = RenderSystem.getDevice().createBuffer(
+                () -> "watut vanilla projection", 128,
+                Std140Builder.onStack(stack, RenderSystem.PROJECTION_MATRIX_UBO_SIZE)
+                    .putMat4f(matrix4f)
+                    .get()
+            );
+        }
+        RenderSystem.setProjectionMatrix(vanillaProjectionBuffer.slice(), ProjectionType.ORTHOGRAPHIC);
     }
 
     public static void unbindVanillaRenderTarget() {
@@ -297,112 +319,145 @@ public class RenderHelper {
         if (needsScreenUpdate && !processor.hasWork()) {
             playerStatusLocal.getScreenData().setNeedsNewRenderToPixelData(false);
             ScreenParticleRenderer.getInstance().checkSetup();
+            // In 1.21.6, screen.renderWithTooltip() no longer does GPU work (two-phase rendering).
+            // Build a screen-only GuiRenderState by re-running Screen.renderWithTooltip() into an isolated
+            // GuiGraphics (CPU-side draw-list generation only). GuiRendererCaptureMixin will render that
+            // isolated state to WATUT's offscreen target later in the same frame when fog/uniform buffers exist.
+            prepareScreenOnlyCaptureRenderState(pMouseX, pMouseY, pPartialTick);
+            pendingGuiOnlyCapturePrepared = false;
+            pendingCapture = true;
+        }
+    }
 
-            ScreenParticleRenderer.getInstance().bind();
+    private static void prepareScreenOnlyCaptureRenderState(int pMouseX, int pMouseY, float pPartialTick) {
+        pendingScreenOnlyCaptureRenderState = null;
 
-            if (Minecraft.getInstance().screen != null) {
-                if (ConfigServerControlledSyncedToClient.dynamicGuiDisableBackgroundRendering) {
-                    ScreenParticleRenderer.isRenderingParticleGUI2 = true;
-                }
-                performingOwnRender = true;
+        Minecraft mc = Minecraft.getInstance();
+        Screen screen = mc.screen;
+        if (screen == null) return;
 
-                xaeroWorldMapTextureID = -1;
+        GuiRenderState captureState = new GuiRenderState();
+        GuiGraphics captureGraphics = new GuiGraphics(mc, captureState);
 
-                if (isXaeroGuiMap(Minecraft.getInstance().screen)) {
-                    try {
-                        Object fbo = guiMapPrimaryScaleFBO.get(null);
-                        if (fbo != null) {
-                            Object colorTextureIdObj = colorTextureId.get(fbo);
-                            if (colorTextureIdObj != null) {
-                                xaeroWorldMapTextureID = (int) colorTextureIdObj;
-                            }
+        try {
+            if (ConfigServerControlledSyncedToClient.dynamicGuiDisableBackgroundRendering) {
+                ScreenParticleRenderer.isRenderingParticleGUI2 = true;
+            }
+            performingOwnRender = true;
+
+            xaeroWorldMapTextureID = -1;
+            if (isXaeroGuiMap(screen)) {
+                try {
+                    Object fbo = guiMapPrimaryScaleFBO.get(null);
+                    if (fbo != null) {
+                        Object colorTextureIdObj = colorTextureId.get(fbo);
+                        if (colorTextureIdObj != null) {
+                            xaeroWorldMapTextureID = (int) colorTextureIdObj;
                         }
-                    } catch (IllegalAccessException e) {
-                        e.printStackTrace();
                     }
+                } catch (IllegalAccessException e) {
+                    e.printStackTrace();
                 }
-                Minecraft.getInstance().screen.renderWithTooltip(pGuiGraphics, pMouseX, pMouseY, pPartialTick);
-
-                // Flush the BufferSource BEFORE unbinding so draws go to the custom target
-                pGuiGraphics.flush();
-
-                performingOwnRender = false;
-                ScreenParticleRenderer.isRenderingParticleGUI = false;
-                ScreenParticleRenderer.isRenderingParticleGUI2 = false;
             }
 
-            ScreenParticleRenderer.getInstance().unbind();
+            screen.renderWithTooltip(captureGraphics, pMouseX, pMouseY, pPartialTick);
+            pendingScreenOnlyCaptureRenderState = captureState;
+        } catch (Throwable t) {
+            pendingScreenOnlyCaptureRenderState = null;
+            t.printStackTrace();
+        } finally {
+            performingOwnRender = false;
+            ScreenParticleRenderer.isRenderingParticleGUI = false;
+            ScreenParticleRenderer.isRenderingParticleGUI2 = false;
+        }
+    }
 
-            //if (true) return;
+    public static synchronized GuiRenderState consumePendingScreenOnlyCaptureRenderState() {
+        GuiRenderState state = pendingScreenOnlyCaptureRenderState;
+        pendingScreenOnlyCaptureRenderState = null;
+        return state;
+    }
 
-            //readPixelsTest();
-            ByteBuffer pixelBuffer;
+    /**
+     * Called by GameRendererCaptureMixin at the end of GameRenderer.render().
+     *
+     * In 1.21.6 the GUI is rendered via GuiRenderer draw-lists. WATUT replays those draw-lists to its
+     * own offscreen target earlier in the frame (see GuiRenderer mixin), then this method performs
+     * the blur and async readback from that GUI-only target.
+     */
+    public static void captureScreenAfterGuiRender() {
+        if (!pendingCapture) return;
+        pendingCapture = false;
+        boolean guiOnlyCapturePrepared = pendingGuiOnlyCapturePrepared;
+        pendingGuiOnlyCapturePrepared = false;
+        if (!guiOnlyCapturePrepared) {
+            pendingScreenOnlyCaptureRenderState = null;
+        }
 
+        if (!useDynamicGUISystem()) return;
+        if (Minecraft.getInstance().level == null || Minecraft.getInstance().player == null) return;
+        if (Minecraft.getInstance().screen == null) return;
+        if (!guiOnlyCapturePrepared) return;
+
+        ScreenParticleRenderer spr = ScreenParticleRenderer.getInstance();
+        spr.checkSetup();
+
+        // Use the WATUT offscreen target populated by the GuiRenderer replay mixin.
+        GpuTextureView sourceView = spr.getMainRenderTarget().getColorTextureView();
+        if (sourceView == null) return;
+
+        spr.setCaptureSourceOverride(sourceView);
+
+        try {
             double guiScale = Minecraft.getInstance().getWindow().getGuiScale();
             if (ConfigServerControlledSyncedToClient.dynamicGuiShowClientsEntireScreen) {
                 guiScale = 1;
             }
-            int croppedWidth = (int) (ScreenParticleRenderer.getInstance().widthScaledDown * guiScale);
-            int croppedHeight = (int) (ScreenParticleRenderer.getInstance().heightScaledDown * guiScale);
+            int croppedWidth = (int) (spr.widthScaledDown * guiScale);
+            int croppedHeight = (int) (spr.heightScaledDown * guiScale);
 
-            int centerX = ScreenParticleRenderer.getInstance().width / 2;
-            int centerY = ScreenParticleRenderer.getInstance().height / 2;
+            int centerX = spr.width / 2;
+            int centerY = spr.height / 2;
             int x1 = centerX - (croppedWidth / 2);
             int x2 = centerX + (croppedWidth / 2);
             int y1 = centerY - (croppedHeight / 2);
             int y2 = centerY + (croppedHeight / 2);
-            float minU = (float)x1 / (float)ScreenParticleRenderer.getInstance().width;
-            float maxU = (float)x2 / (float)ScreenParticleRenderer.getInstance().width;
-            float minV = (float)y1 / (float)ScreenParticleRenderer.getInstance().height;
-            float maxV = (float)y2 / (float)ScreenParticleRenderer.getInstance().height;
+            float minU = (float) x1 / (float) spr.width;
+            float maxU = (float) x2 / (float) spr.width;
+            float minV = (float) y1 / (float) spr.height;
+            float maxV = (float) y2 / (float) spr.height;
 
             x1 = 0;
-            x2 = ScreenParticleRenderer.getInstance().widthScaledDown;
+            x2 = spr.widthScaledDown;
             y1 = 0;
-            y2 = ScreenParticleRenderer.getInstance().heightScaledDown;
+            y2 = spr.heightScaledDown;
 
-            boolean test = false;
-            if (test) {
-                //no-op: cursor rendering not yet ported to 1.21.5
+            boolean useBlur = true;
+            if (useBlur) {
+                spr.innerBlitCustomShaderHorizontal(
+                        x1, x2, y1, y2, 0, minU, maxU, minV, maxV);
+
+                spr.innerBlitCustomShaderVertical(
+                        0, spr.widthScaledDown, 0, spr.heightScaledDown, 0, 0, 1, 0, 1);
             } else {
-                boolean useBlur = true;
-                if (useBlur) {
-                    ScreenParticleRenderer.getInstance().innerBlitCustomShaderHorizontal(
-                            x1, x2
-                            , y1, y2
-                            , 0
-                            , minU, maxU, minV, maxV);
+                spr.innerBlitCustomShader(
+                        x1, x2, y1, y2, 0, minU, maxU, minV, maxV);
+            }
 
-                    ScreenParticleRenderer.getInstance().innerBlitCustomShaderVertical(
-                            0, ScreenParticleRenderer.getInstance().widthScaledDown
-                            , 0, ScreenParticleRenderer.getInstance().heightScaledDown
-                            , 0
-                            , 0, 1, 0, 1);
+            // Async readback from scaled down framebuffer
+            getPixelDataFromFrameBufferAsync((pixelBuffer) -> {
+                boolean useThread = true;
+                if (useThread) {
+                    processor.submitForProcessing(pixelBuffer);
                 } else {
-                    ScreenParticleRenderer.getInstance().innerBlitCustomShader(
-                            x1, x2
-                            , y1, y2
-                            , 0
-                            , minU, maxU, minV, maxV);
+                    PlayerStatus playerStatusLocal = WatutMod.getPlayerStatusManagerClient().getStatusLocal();
+                    ByteBuffer byteBuffer = compress(pixelBuffer);
+                    playerStatusLocal.getScreenData().setTexturePixelData(byteBuffer);
+                    WatutMod.getPlayerStatusManagerClient().sendScreenRenderData(playerStatusLocal);
                 }
-            }
-
-
-            //if (true) return;
-
-            //getting data from scaled down framebuffer
-            pixelBuffer = getPixelDataFromFrameBuffer();
-
-            boolean useThread = true;
-            if (useThread) {
-                processor.submitForProcessing(pixelBuffer);
-            } else {
-                ByteBuffer byteBuffer = compress(pixelBuffer);
-                playerStatusLocal.getScreenData().setTexturePixelData(byteBuffer);
-                WatutMod.getPlayerStatusManagerClient().sendScreenRenderData(playerStatusLocal);
-            }
-
-            bindVanillaRenderTargetAndSetupProjectionMatrix();
+            });
+        } finally {
+            spr.clearCaptureSourceOverride();
         }
     }
 
@@ -570,39 +625,90 @@ public class RenderHelper {
         return ByteBuffer.wrap(compressedBytes);
     }
 
-    public static ByteBuffer getPixelDataFromFrameBuffer() {
-        int width = ScreenParticleRenderer.getInstance().widthScaledDown;
-        int height = ScreenParticleRenderer.getInstance().heightScaledDown;
-        int bufferSize = width * height * ScreenParticleRenderer.bytesPerPixel;
+    /**
+     * Copy captured framebuffer bytes into NativeImage backing memory.
+     *
+     * Readback normalization (alpha/channel fixes) is now done at capture time before compression,
+     * so upload only needs a raw copy here.
+     */
+    private static void copyReadbackPixelsToNativeImage(ByteBuffer sourcePixels, long nativeImagePixelMemoryAddress, int width, int height) {
+        MemoryUtil.memCopy(MemoryUtil.memAddress(sourcePixels), nativeImagePixelMemoryAddress,
+                (long) width * height * ScreenParticleRenderer.bytesPerPixel);
+    }
 
-        // In 1.21.5, GL11.glReadPixels is no longer the correct approach
-        // Use CommandEncoder.copyTextureToBuffer for GPU texture readback
-        GpuTexture texture = ScreenParticleRenderer.getInstance().getMainRenderTargetScaledDown().getColorTexture();
-        if (texture == null) {
-            return ByteBuffer.allocateDirect(bufferSize);
-        }
+    /**
+     * Normalize readback bytes to match WATUT's expected transfer format.
+     *
+     * Mojang's Screenshot path forces alpha opaque when converting framebuffer pixels to NativeImage.
+     * We do the same here on the raw readback bytes so the network payload is already normalized.
+     */
+    private static void normalizeCapturedReadbackInPlace(ByteBuffer pixelBuffer, int width, int height, int pixelSize) {
+        if (pixelBuffer == null || pixelSize < 4) return;
 
-        // Create a GPU buffer for readback
-        GpuBuffer readbackBuffer = RenderSystem.getDevice().createBuffer(
-                () -> "watut_readback", BufferType.PIXEL_PACK, BufferUsage.STATIC_READ, bufferSize);
+        int basePos = pixelBuffer.position();
 
-        // Copy texture to buffer (offset=0, mipLevel=0)
-        RenderSystem.getDevice().createCommandEncoder()
-                .copyTextureToBuffer(texture, readbackBuffer, 0, () -> {}, 0);
+        int pixelCount = width * height;
+        for (int i = 0; i < pixelCount; i++) {
+            int base = basePos + i * pixelSize;
 
-        // Read the buffer data
-        ByteBuffer pixelBuffer = ByteBuffer.allocateDirect(bufferSize);
-        try (GpuBuffer.ReadView readView = RenderSystem.getDevice().createCommandEncoder().readBuffer(readbackBuffer)) {
-            ByteBuffer gpuData = readView.data();
-            if (gpuData != null && gpuData.remaining() >= bufferSize) {
-                gpuData.limit(gpuData.position() + bufferSize);
-                pixelBuffer.put(gpuData);
-                pixelBuffer.flip();
+            // GUI-only offscreen capture may still lose alpha on some pipelines.
+            // Preserve transparent clear pixels, but recover visibility for drawn GUI pixels.
+            if (FORCE_CAPTURE_ALPHA_OPAQUE) {
+                pixelBuffer.put(base + 3, (byte) 0xFF);
+            } else if (RECONSTRUCT_ALPHA_FROM_COLOR_WHEN_ZERO && pixelBuffer.get(base + 3) == 0) {
+                int rgbNonZero = (pixelBuffer.get(base) & 0xFF) | (pixelBuffer.get(base + 1) & 0xFF) | (pixelBuffer.get(base + 2) & 0xFF);
+                if (rgbNonZero != 0) {
+                    pixelBuffer.put(base + 3, (byte) 0xFF);
+                }
+            }
+
+            if (SWAP_CAPTURE_RED_BLUE) {
+                byte r = pixelBuffer.get(base);
+                byte b = pixelBuffer.get(base + 2);
+                pixelBuffer.put(base, b);
+                pixelBuffer.put(base + 2, r);
             }
         }
+    }
 
-        readbackBuffer.close();
-        return pixelBuffer;
+    public static void getPixelDataFromFrameBufferAsync(java.util.function.Consumer<ByteBuffer> callback) {
+        int width = ScreenParticleRenderer.getInstance().widthScaledDown;
+        int height = ScreenParticleRenderer.getInstance().heightScaledDown;
+
+        GpuTexture texture = ScreenParticleRenderer.getInstance().getMainRenderTargetScaledDown().getColorTexture();
+        if (texture == null) {
+            int bufferSize = width * height * ScreenParticleRenderer.bytesPerPixel;
+            callback.accept(ByteBuffer.allocateDirect(bufferSize));
+            return;
+        }
+
+        int pixelSize = texture.getFormat().pixelSize();
+        int bufferSize = width * height * pixelSize;
+        if (pixelSize != ScreenParticleRenderer.bytesPerPixel) {
+            CULog.log("watut: unexpected framebuffer pixel size " + pixelSize + ", expected " + ScreenParticleRenderer.bytesPerPixel);
+        }
+
+        // Create a GPU buffer for readback (MAP_READ | COPY_DST = 9)
+        GpuBuffer readbackBuffer = RenderSystem.getDevice().createBuffer(
+                () -> "watut_readback", GpuBuffer.USAGE_MAP_READ | GpuBuffer.USAGE_COPY_DST, bufferSize);
+
+        // Following MC Screenshot pattern: mapEncoder created before, buffer closed inside callback
+        CommandEncoder mapEncoder = RenderSystem.getDevice().createCommandEncoder();
+        RenderSystem.getDevice().createCommandEncoder()
+                .copyTextureToBuffer(texture, readbackBuffer, 0, () -> {
+                    ByteBuffer pixelBuffer = ByteBuffer.allocateDirect(bufferSize);
+                    try (GpuBuffer.MappedView mappedView = mapEncoder.mapBuffer(readbackBuffer, true, false)) {
+                        ByteBuffer gpuData = mappedView.data();
+                        if (gpuData != null && gpuData.remaining() >= bufferSize) {
+                            gpuData.limit(gpuData.position() + bufferSize);
+                            pixelBuffer.put(gpuData);
+                            pixelBuffer.flip();
+                            normalizeCapturedReadbackInPlace(pixelBuffer, width, height, pixelSize);
+                        }
+                    }
+                    readbackBuffer.close();
+                    callback.accept(pixelBuffer);
+                }, 0);
     }
 
     public static boolean validatePixelByteBuffer(ByteBuffer byteBuffer, int expectedSize, int expectedAlignment) {

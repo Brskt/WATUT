@@ -12,14 +12,12 @@ import net.minecraft.client.renderer.RenderStateShard;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.texture.DynamicTexture;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.util.TriState;
 import org.lwjgl.system.MemoryUtil;
 
 import java.nio.ByteBuffer;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public class ScreenData {
-
     private static final RenderPipeline TRANSLUCENT_PARTICLE_NO_CULL = RenderPipelines.register(
             RenderPipeline.builder(RenderPipelines.PARTICLE_SNIPPET)
                     .withLocation("pipeline/watut_translucent_particle_no_cull")
@@ -61,7 +59,6 @@ public class ScreenData {
     public static boolean testing = false;
 
     public void initClient() {
-
         this.particleRenderType = new ParticleRenderTypeOld() {
             @Override
             public RenderType getRenderType() {
@@ -88,14 +85,15 @@ public class ScreenData {
             }
             Minecraft.getInstance().getTextureManager().register(textureLocation, image);
             cachedRenderType = RenderType.create(
-                    "watut_translucent_particle_no_cull",
+                    "watut_translucent_particle_no_cull_dynamic_" + System.identityHashCode(this),
                     1536,
                     TRANSLUCENT_PARTICLE_NO_CULL,
                     RenderType.CompositeState.builder()
-                            .setTextureState(new RenderStateShard.TextureStateShard(textureLocation, TriState.FALSE, false))
+                            .setTextureState(new RenderStateShard.TextureStateShard(textureLocation, false))
                             .setOutputState(RenderStateShard.PARTICLES_TARGET)
                             .setLightmapState(RenderStateShard.LIGHTMAP)
-                            .createCompositeState(false));
+                            .createCompositeState(false)
+            );
         }
     }
 

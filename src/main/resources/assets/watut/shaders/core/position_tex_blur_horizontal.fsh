@@ -2,12 +2,15 @@
 
 uniform sampler2D InSampler;
 
-uniform vec4 ColorModulator;
+layout(std140) uniform BlurParams {
+    vec2 resolution;
+    float radius;
+    float blurLevel;
+    vec2 InCropMin;
+    vec2 InCropMax;
+};
 
 in vec2 texCoord0;
-uniform float blurLevel;
-uniform vec2 InCropMin;
-uniform vec2 InCropMax;
 
 out vec4 fragColor;
 
@@ -31,6 +34,10 @@ void main() {
         for (int i = -blurRange; i <= blurRange; ++i) {
             result.rgb += texture(InSampler, uv + vec2(tex_offset.x * float(i), 0.0)).rgb * weights[abs(i)];
         }
+    }
+    // GUI-only capture targets may preserve RGB but lose alpha; recover alpha for visible pixels.
+    if (result.a <= 0.0 && dot(result.rgb, vec3(1.0)) > 0.0) {
+        result.a = 1.0;
     }
     if (result.a <= 0.0) {
         discard;

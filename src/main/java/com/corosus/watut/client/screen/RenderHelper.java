@@ -8,11 +8,8 @@ import com.corosus.watut.WatutMod;
 import com.corosus.watut.config.ConfigClient;
 import com.corosus.watut.config.ConfigServerControlledSyncedToClient;
 import com.corosus.watut.mixin.client.NativeImageAccessor;
-import com.mojang.blaze3d.ProjectionType;
 import com.mojang.blaze3d.buffers.GpuBuffer;
-import com.mojang.blaze3d.buffers.Std140Builder;
 import com.mojang.blaze3d.systems.CommandEncoder;
-import com.mojang.blaze3d.platform.Window;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.textures.GpuTexture;
 import com.mojang.blaze3d.textures.GpuTextureView;
@@ -23,14 +20,11 @@ import net.minecraft.client.gui.render.state.GuiRenderState;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.renderer.texture.DynamicTexture;
 import net.minecraft.resources.ResourceLocation;
-import org.joml.Matrix4f;
-import org.lwjgl.system.MemoryStack;
 import org.lwjgl.system.MemoryUtil;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.nio.ByteBuffer;
@@ -44,20 +38,12 @@ public class RenderHelper {
     public static boolean performingOwnRender = false;
     public static boolean pendingCapture = false;
     public static boolean pendingGuiOnlyCapturePrepared = false;
-    private static final boolean FORCE_CAPTURE_ALPHA_OPAQUE = false;
-    private static final boolean RECONSTRUCT_ALPHA_FROM_COLOR_WHEN_ZERO = false;
-    // Toggle only if a backend/platform returns BGRA-like byte order during readback.
-    // Keep disabled unless colors are visibly swapped (red<->blue).
-    private static final boolean SWAP_CAPTURE_RED_BLUE = false;
     private static GuiRenderState pendingScreenOnlyCaptureRenderState = null;
     public static ResourceLocation cursor = ResourceLocation.fromNamespaceAndPath(WatutMod.MODID, "textures/misc/mouse.png");
 
-    //xaero minimap support (doesnt capture extra elements just terrain)
+    // Xaero World Map detection (used to disable blur while the map GUI is open).
     public static Class guiMap;
-    public static Class improvedFramebuffer;
-    public static int xaeroWorldMapTextureID = -1;
-    public static Field guiMapPrimaryScaleFBO;
-    public static Field colorTextureId;
+    public static boolean xaeroGuiMapCaptureActive = false;
 
     //shaders enable check support
     public static Class irisConfig;
@@ -69,11 +55,6 @@ public class RenderHelper {
     static {
         try {
             guiMap = Class.forName("xaero.map.gui.GuiMap");
-        } catch (ClassNotFoundException e) {
-            //e.printStackTrace();
-        }
-        try {
-            improvedFramebuffer = Class.forName("xaero.map.graphics.ImprovedFramebuffer");
         } catch (ClassNotFoundException e) {
             //e.printStackTrace();
         }
@@ -98,25 +79,6 @@ public class RenderHelper {
             }
         } catch (NoSuchMethodException e) {
             CULog.log("watut: oculus not installed or mod structure changed");
-        }
-        try {
-            improvedFramebuffer = Class.forName("xaero.map.graphics.ImprovedFramebuffer");
-        } catch (ClassNotFoundException e) {
-            //e.printStackTrace();
-        }
-        try {
-            if (guiMap != null) {
-                guiMapPrimaryScaleFBO = guiMap.getDeclaredField("primaryScaleFBO");
-                guiMapPrimaryScaleFBO.setAccessible(true);
-            }
-            if (improvedFramebuffer != null) {
-                colorTextureId = improvedFramebuffer.getDeclaredField("colorTextureId");
-            } else {
-                CULog.log("watut: xaero minimap not installed or mod structure changed");
-            }
-        } catch (NoSuchFieldException e) {
-            CULog.log("watut: xaero minimap not installed or mod structure changed");
-            //e.printStackTrace();
         }
     }
 
@@ -260,31 +222,6 @@ public class RenderHelper {
         }
     }
 
-    private static GpuBuffer vanillaProjectionBuffer = null;
-
-    public static void bindVanillaRenderTargetAndSetupProjectionMatrix() {
-        Window window = Minecraft.getInstance().getWindow();
-        Matrix4f matrix4f = (new Matrix4f()).setOrtho(0.0F, (float)((double)window.getWidth() / window.getGuiScale()), (float)((double)window.getHeight() / window.getGuiScale()), 0.0F, 1000.0F, WatutMod.instance().getFarPlane());
-
-        if (vanillaProjectionBuffer != null) {
-            vanillaProjectionBuffer.close();
-        }
-        try (MemoryStack stack = MemoryStack.stackPush()) {
-            vanillaProjectionBuffer = RenderSystem.getDevice().createBuffer(
-                () -> "watut vanilla projection", 128,
-                Std140Builder.onStack(stack, RenderSystem.PROJECTION_MATRIX_UBO_SIZE)
-                    .putMat4f(matrix4f)
-                    .get()
-            );
-        }
-        RenderSystem.setProjectionMatrix(vanillaProjectionBuffer.slice(), ProjectionType.ORTHOGRAPHIC);
-    }
-
-    public static void unbindVanillaRenderTarget() {
-        // In 1.21.5, unbindWrite() is no longer available on RenderTarget
-        // No-op
-    }
-
     public static boolean useDynamicGUISystem() {
         if (ConfigServerControlledSyncedToClient.dynamicGuiUseOldSimpleGUIVisual) return false;
         if (ConfigClient.dontSendDetailedGUIInfo) return false;
@@ -331,6 +268,7 @@ public class RenderHelper {
 
     private static void prepareScreenOnlyCaptureRenderState(int pMouseX, int pMouseY, float pPartialTick) {
         pendingScreenOnlyCaptureRenderState = null;
+        xaeroGuiMapCaptureActive = false;
 
         Minecraft mc = Minecraft.getInstance();
         Screen screen = mc.screen;
@@ -344,21 +282,7 @@ public class RenderHelper {
                 ScreenParticleRenderer.isRenderingParticleGUI2 = true;
             }
             performingOwnRender = true;
-
-            xaeroWorldMapTextureID = -1;
-            if (isXaeroGuiMap(screen)) {
-                try {
-                    Object fbo = guiMapPrimaryScaleFBO.get(null);
-                    if (fbo != null) {
-                        Object colorTextureIdObj = colorTextureId.get(fbo);
-                        if (colorTextureIdObj != null) {
-                            xaeroWorldMapTextureID = (int) colorTextureIdObj;
-                        }
-                    }
-                } catch (IllegalAccessException e) {
-                    e.printStackTrace();
-                }
-            }
+            xaeroGuiMapCaptureActive = isXaeroGuiMap(screen);
 
             screen.renderWithTooltip(captureGraphics, pMouseX, pMouseY, pPartialTick);
             pendingScreenOnlyCaptureRenderState = captureState;
@@ -397,13 +321,17 @@ public class RenderHelper {
         if (!useDynamicGUISystem()) return;
         if (Minecraft.getInstance().level == null || Minecraft.getInstance().player == null) return;
         if (Minecraft.getInstance().screen == null) return;
-        if (!guiOnlyCapturePrepared) return;
+        boolean useXaeroMainTargetFallback = xaeroGuiMapCaptureActive;
+        if (!guiOnlyCapturePrepared && !useXaeroMainTargetFallback) return;
 
         ScreenParticleRenderer spr = ScreenParticleRenderer.getInstance();
         spr.checkSetup();
 
-        // Use the WATUT offscreen target populated by the GuiRenderer replay mixin.
-        GpuTextureView sourceView = spr.getMainRenderTarget().getColorTextureView();
+        // Xaero World Map does not fully participate in the 1.21.6 GuiRenderState draw-list path,
+        // so fall back to the vanilla main target after GUI render for that screen only.
+        GpuTextureView sourceView = useXaeroMainTargetFallback
+                ? Minecraft.getInstance().getMainRenderTarget().getColorTextureView()
+                : spr.getMainRenderTarget().getColorTextureView();
         if (sourceView == null) return;
 
         spr.setCaptureSourceOverride(sourceView);
@@ -636,41 +564,6 @@ public class RenderHelper {
                 (long) width * height * ScreenParticleRenderer.bytesPerPixel);
     }
 
-    /**
-     * Normalize readback bytes to match WATUT's expected transfer format.
-     *
-     * Mojang's Screenshot path forces alpha opaque when converting framebuffer pixels to NativeImage.
-     * We do the same here on the raw readback bytes so the network payload is already normalized.
-     */
-    private static void normalizeCapturedReadbackInPlace(ByteBuffer pixelBuffer, int width, int height, int pixelSize) {
-        if (pixelBuffer == null || pixelSize < 4) return;
-
-        int basePos = pixelBuffer.position();
-
-        int pixelCount = width * height;
-        for (int i = 0; i < pixelCount; i++) {
-            int base = basePos + i * pixelSize;
-
-            // GUI-only offscreen capture may still lose alpha on some pipelines.
-            // Preserve transparent clear pixels, but recover visibility for drawn GUI pixels.
-            if (FORCE_CAPTURE_ALPHA_OPAQUE) {
-                pixelBuffer.put(base + 3, (byte) 0xFF);
-            } else if (RECONSTRUCT_ALPHA_FROM_COLOR_WHEN_ZERO && pixelBuffer.get(base + 3) == 0) {
-                int rgbNonZero = (pixelBuffer.get(base) & 0xFF) | (pixelBuffer.get(base + 1) & 0xFF) | (pixelBuffer.get(base + 2) & 0xFF);
-                if (rgbNonZero != 0) {
-                    pixelBuffer.put(base + 3, (byte) 0xFF);
-                }
-            }
-
-            if (SWAP_CAPTURE_RED_BLUE) {
-                byte r = pixelBuffer.get(base);
-                byte b = pixelBuffer.get(base + 2);
-                pixelBuffer.put(base, b);
-                pixelBuffer.put(base + 2, r);
-            }
-        }
-    }
-
     public static void getPixelDataFromFrameBufferAsync(java.util.function.Consumer<ByteBuffer> callback) {
         int width = ScreenParticleRenderer.getInstance().widthScaledDown;
         int height = ScreenParticleRenderer.getInstance().heightScaledDown;
@@ -703,7 +596,6 @@ public class RenderHelper {
                             gpuData.limit(gpuData.position() + bufferSize);
                             pixelBuffer.put(gpuData);
                             pixelBuffer.flip();
-                            normalizeCapturedReadbackInPlace(pixelBuffer, width, height, pixelSize);
                         }
                     }
                     readbackBuffer.close();

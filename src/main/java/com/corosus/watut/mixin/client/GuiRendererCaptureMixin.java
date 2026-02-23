@@ -3,6 +3,7 @@ package com.corosus.watut.mixin.client;
 import com.corosus.watut.client.screen.RenderHelper;
 import com.corosus.watut.client.screen.ScreenParticleRenderer;
 import com.mojang.blaze3d.buffers.GpuBufferSlice;
+import com.mojang.logging.LogUtils;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.render.GuiRenderer;
 import net.minecraft.client.gui.render.state.GuiRenderState;
@@ -14,6 +15,7 @@ import org.spongepowered.asm.mixin.gen.Invoker;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import org.slf4j.Logger;
 
 import java.util.List;
 
@@ -23,6 +25,9 @@ import java.util.List;
  */
 @Mixin(GuiRenderer.class)
 public abstract class GuiRendererCaptureMixin {
+    private static final Logger LOGGER = LogUtils.getLogger();
+    private static boolean loggedReplayFailure = false;
+
     @Mutable
     @Shadow @Final
     private GuiRenderState renderState;
@@ -80,7 +85,10 @@ public abstract class GuiRendererCaptureMixin {
         } catch (Throwable t) {
             // Keep capture disabled for this frame if replay fails.
             RenderHelper.pendingGuiOnlyCapturePrepared = false;
-            t.printStackTrace();
+            if (!loggedReplayFailure) {
+                loggedReplayFailure = true;
+                LOGGER.error("WATUT GUI-only replay failed in GuiRendererCaptureMixin (logging once)", t);
+            }
         } finally {
             spr.unbind();
         }

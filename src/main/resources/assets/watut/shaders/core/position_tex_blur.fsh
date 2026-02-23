@@ -16,10 +16,18 @@ out vec4 fragColor;
 
 const float weight[5] = float[](0.227027, 0.1945946, 0.1216216, 0.054054, 0.016216);
 
+vec4 sampleGui(vec2 uv) {
+    vec4 s = texture(InSampler, uv);
+    if (s.a <= 0.0 && dot(s.rgb, vec3(1.0)) > 0.0) {
+        s.a = 1.0;
+    }
+    return s;
+}
+
 void main() {
     // Remap texCoord0 from [0,1] to the crop region of the source texture
     vec2 uv = mix(InCropMin, InCropMax, texCoord0);
-    vec4 color = texture(InSampler, uv);
+    vec4 color = sampleGui(uv);
 
     float r = radius;
     float x,y,xx,yy,rr=r*r,dx,dy,w,w0;
@@ -39,12 +47,15 @@ void main() {
             yy=y*y;
             if (xx+yy<=rr) {
                 w=w0*exp((-xx-yy)/(2.0*rr));
-                col+=texture(InSampler,p)*w;
+                vec4 s = sampleGui(p);
+                col += vec4(s.rgb * s.a, s.a) * w;
             }
         }
     }
     if (r == 0) {
-        col=texture(InSampler, uv);
+        col = sampleGui(uv);
+    } else if (col.a > 0.0) {
+        col.rgb /= col.a;
     }
     //col.a = texCoord0.y;
     int cutoff = 128;
@@ -55,9 +66,6 @@ void main() {
         col.a = min(col.a, 1 - ((dist - cutoff) / cutoff2));
     }
     //col.a = 0.32;
-    if (col.a <= 0.0 && dot(col.rgb, vec3(1.0)) > 0.0) {
-        col.a = 1.0;
-    }
     if (col.a <= 0.0) {
         discard;
     }

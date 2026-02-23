@@ -15,8 +15,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * 1. screen.renderWithTooltip() fills GuiRenderState (no GPU work)
  * 2. GuiRenderer.render() actually draws everything to the main render target
  *
- * WATUT's screen capture must happen after phase 2, so we inject at TAIL of GameRenderer.render()
- * where the main render target contains the complete frame (3D world + GUI).
+ * WATUT uses this timing hook to run its post-GUI capture pipeline after phase 2.
+ * The actual captured source is WATUT's GUI-only offscreen target (populated by GuiRendererCaptureMixin),
+ * not the vanilla full frame render target.
  */
 @Mixin(GameRenderer.class)
 public abstract class GameRendererCaptureMixin {

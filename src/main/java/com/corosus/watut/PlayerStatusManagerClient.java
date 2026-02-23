@@ -812,10 +812,7 @@ public class PlayerStatusManagerClient extends PlayerStatusManager {
                     /*} else {
                         Minecraft.getInstance().particleEngine.add(particle);
                     }*/
-                } else {
                 }
-            } else {
-
             }
         }
 

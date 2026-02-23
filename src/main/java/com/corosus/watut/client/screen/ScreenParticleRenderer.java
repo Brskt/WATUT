@@ -3,6 +3,7 @@ package com.corosus.watut.client.screen;
 import com.corosus.coroutil.util.CULog;
 import com.corosus.watut.PlayerStatusManagerClient;
 import com.corosus.watut.config.ConfigServerControlledSyncedToClient;
+import com.corosus.watut.mixin.client.MinecraftAccessor;
 import com.mojang.blaze3d.ProjectionType;
 import com.mojang.blaze3d.buffers.GpuBuffer;
 import com.mojang.blaze3d.pipeline.MainTarget;
@@ -11,21 +12,24 @@ import com.mojang.blaze3d.systems.CommandEncoder;
 import com.mojang.blaze3d.systems.RenderPass;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.buffers.Std140Builder;
-import com.mojang.blaze3d.textures.GpuTexture;
 import com.mojang.blaze3d.textures.GpuTextureView;
 import com.mojang.blaze3d.vertex.VertexFormat;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.MappableRingBuffer;
 import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.resources.ResourceLocation;
 import org.joml.Matrix4f;
-import org.lwjgl.system.MemoryStack;
 
 import java.util.OptionalInt;
 
 public class ScreenParticleRenderer {
+    private static final int UNIFORM_RING_BUFFER_USAGE = GpuBuffer.USAGE_MAP_WRITE | GpuBuffer.USAGE_UNIFORM;
+    private static final int BLUR_PARAMS_UBO_SIZE = 32;
+    private static final int SAMPLER_INFO_UBO_SIZE = 16;
 
     public static boolean isRenderingParticleGUI = false;
     public static boolean isRenderingParticleGUI2 = false;
+    private RenderTarget savedMainRenderTarget;
 
     //used on client with gui open side
     //used to capture raw copy of minecraft screen
@@ -33,6 +37,8 @@ public class ScreenParticleRenderer {
 
     //used to render a sized down and cropped version of the above raw copy
     private MainTarget mainRenderTargetScaledDown;
+    //intermediate ping-pong target to avoid sampling and writing the same texture in one pass
+    private MainTarget mainRenderTargetScaledDownIntermediate;
 
     public int width;
     public int height;
@@ -45,6 +51,9 @@ public class ScreenParticleRenderer {
 
     // Set temporarily during captureScreenAfterGuiRender to override the input source for blur passes
     private GpuTextureView captureSourceOverrideView = null;
+    private MappableRingBuffer projectionUniformRing;
+    private MappableRingBuffer blurParamsUniformRing;
+    private MappableRingBuffer samplerInfoUniformRing;
 
     private static ScreenParticleRenderer instance;
 
@@ -63,6 +72,7 @@ public class ScreenParticleRenderer {
     }
 
     public void setup() {
+        closeUniformRings();
         Minecraft mc = Minecraft.getInstance();
         width = mc.getWindow().getWidth();
         height = mc.getWindow().getHeight();
@@ -80,6 +90,8 @@ public class ScreenParticleRenderer {
 
         mainRenderTargetScaledDown = new MainTarget(widthScaledDown, heightScaledDown);
         encoder.clearColorTexture(mainRenderTargetScaledDown.getColorTexture(), 0);
+        mainRenderTargetScaledDownIntermediate = new MainTarget(widthScaledDown, heightScaledDown);
+        encoder.clearColorTexture(mainRenderTargetScaledDownIntermediate.getColorTexture(), 0);
     }
 
     public synchronized void resize(int width, int height) {
@@ -107,14 +119,16 @@ public class ScreenParticleRenderer {
         if (mainRenderTargetScaledDown.width != widthToUse || mainRenderTargetScaledDown.height != heightToUse) {
             mainRenderTargetScaledDown.resize(widthToUse, heightToUse);
         }
+        if (mainRenderTargetScaledDownIntermediate.width != widthToUse || mainRenderTargetScaledDownIntermediate.height != heightToUse) {
+            mainRenderTargetScaledDownIntermediate.resize(widthToUse, heightToUse);
+        }
     }
 
-    private RenderTarget savedMainRenderTarget;
-
     public void bind() {
-        Minecraft mc = Minecraft.getInstance();
-        savedMainRenderTarget = mc.mainRenderTarget;
-        mc.mainRenderTarget = mainRenderTarget;
+        MinecraftAccessor mcAccessor = (MinecraftAccessor) Minecraft.getInstance();
+        savedMainRenderTarget = mcAccessor.watut$getMainRenderTarget();
+        mcAccessor.watut$setMainRenderTarget(mainRenderTarget);
+
         CommandEncoder encoder = RenderSystem.getDevice().createCommandEncoder();
         encoder.clearColorTexture(mainRenderTarget.getColorTexture(), 0);
         // Clear depth to 1.0 so GUI fragments pass the depth test (LEQUAL)
@@ -124,9 +138,8 @@ public class ScreenParticleRenderer {
     }
 
     public void unbind() {
-        Minecraft mc = Minecraft.getInstance();
         if (savedMainRenderTarget != null) {
-            mc.mainRenderTarget = savedMainRenderTarget;
+            ((MinecraftAccessor) Minecraft.getInstance()).watut$setMainRenderTarget(savedMainRenderTarget);
             savedMainRenderTarget = null;
         }
     }
@@ -169,6 +182,92 @@ public class ScreenParticleRenderer {
         return mainRenderTarget.getColorTextureView();
     }
 
+    private void ensureUniformRings() {
+        if (projectionUniformRing == null) {
+            projectionUniformRing = new MappableRingBuffer(
+                    () -> "watut Projection",
+                    UNIFORM_RING_BUFFER_USAGE,
+                    RenderSystem.PROJECTION_MATRIX_UBO_SIZE
+            );
+        }
+        if (blurParamsUniformRing == null) {
+            blurParamsUniformRing = new MappableRingBuffer(
+                    () -> "watut BlurParams",
+                    UNIFORM_RING_BUFFER_USAGE,
+                    BLUR_PARAMS_UBO_SIZE
+            );
+        }
+        if (samplerInfoUniformRing == null) {
+            samplerInfoUniformRing = new MappableRingBuffer(
+                    () -> "watut SamplerInfo",
+                    UNIFORM_RING_BUFFER_USAGE,
+                    SAMPLER_INFO_UBO_SIZE
+            );
+        }
+    }
+
+    private void closeUniformRings() {
+        if (projectionUniformRing != null) {
+            projectionUniformRing.close();
+            projectionUniformRing = null;
+        }
+        if (blurParamsUniformRing != null) {
+            blurParamsUniformRing.close();
+            blurParamsUniformRing = null;
+        }
+        if (samplerInfoUniformRing != null) {
+            samplerInfoUniformRing.close();
+            samplerInfoUniformRing = null;
+        }
+    }
+
+    private GpuBuffer writeProjectionUniformBuffer(CommandEncoder encoder) {
+        ensureUniformRings();
+        GpuBuffer buffer = projectionUniformRing.currentBuffer();
+        try (GpuBuffer.MappedView mappedView = encoder.mapBuffer(buffer, false, true)) {
+            Std140Builder.intoBuffer(mappedView.data())
+                    .putMat4f(new Matrix4f().setOrtho(0.0f, widthScaledDown, 0.0f, heightScaledDown, 0.1f, 1000.0f));
+        }
+        return buffer;
+    }
+
+    private GpuBuffer writeBlurParamsUniformBuffer(CommandEncoder encoder, float radius, float blurLevel, float minU, float minV, float maxU, float maxV) {
+        ensureUniformRings();
+        GpuBuffer buffer = blurParamsUniformRing.currentBuffer();
+        try (GpuBuffer.MappedView mappedView = encoder.mapBuffer(buffer, false, true)) {
+            Std140Builder.intoBuffer(mappedView.data())
+                    .putVec2((float) widthScaledDown, (float) heightScaledDown)
+                    .putFloat(radius)
+                    .putFloat(blurLevel)
+                    .putVec2(minU, minV)
+                    .putVec2(maxU, maxV);
+        }
+        return buffer;
+    }
+
+    private GpuBuffer writeSamplerInfoUniformBuffer(CommandEncoder encoder, GpuTextureView inputView) {
+        ensureUniformRings();
+        GpuBuffer buffer = samplerInfoUniformRing.currentBuffer();
+        try (GpuBuffer.MappedView mappedView = encoder.mapBuffer(buffer, false, true)) {
+            Std140Builder.intoBuffer(mappedView.data())
+                    .putVec2((float) widthScaledDown, (float) heightScaledDown)
+                    .putVec2((float) inputView.getWidth(0), (float) inputView.getHeight(0));
+        }
+        return buffer;
+    }
+
+    private void advanceUniformRings() {
+        if (projectionUniformRing != null) {
+            projectionUniformRing.rotate();
+        }
+        if (blurParamsUniformRing != null) {
+            blurParamsUniformRing.rotate();
+        }
+        if (samplerInfoUniformRing != null) {
+            samplerInfoUniformRing.rotate();
+        }
+    }
+
     public void innerBlitCustomShader(int p_281399_, int p_283222_, int p_283615_, int p_283430_, int p_281729_, float minU, float maxU, float minV, float maxV) {
         GpuTextureView inputView = resolveCaptureInputView();
         GpuTextureView outputView = mainRenderTargetScaledDown.getColorTextureView();
@@ -177,36 +276,15 @@ public class ScreenParticleRenderer {
         RenderSystem.AutoStorageIndexBuffer seqBuf = RenderSystem.getSequentialBuffer(VertexFormat.Mode.QUADS);
         GpuBuffer indexBuffer = seqBuf.getBuffer(6);
         GpuBuffer quadBuffer = RenderSystem.getQuadVertexBuffer();
+        CommandEncoder encoder = RenderSystem.getDevice().createCommandEncoder();
+        GpuBuffer projBuffer = writeProjectionUniformBuffer(encoder);
+        GpuBuffer blurParamsBuffer = writeBlurParamsUniformBuffer(encoder, 0f, 0f, minU, minV, maxU, maxV);
+        GpuBuffer samplerInfoBuffer = writeSamplerInfoUniformBuffer(encoder, inputView);
 
-        try (MemoryStack stack = MemoryStack.stackPush()) {
-            GpuBuffer projBuffer = RenderSystem.getDevice().createBuffer(
-                () -> "watut projection", 128,
-                Std140Builder.onStack(stack, RenderSystem.PROJECTION_MATRIX_UBO_SIZE)
-                    .putMat4f(new Matrix4f().setOrtho(0.0f, widthScaledDown, 0.0f, heightScaledDown, 0.1f, 1000.0f))
-                    .get()
-            );
-            GpuBuffer blurParamsBuffer = RenderSystem.getDevice().createBuffer(
-                () -> "watut BlurParams", 128,
-                Std140Builder.onStack(stack, 32)
-                    .putVec2((float) widthScaledDown, (float) heightScaledDown)
-                    .putFloat(0f)
-                    .putFloat(0f)
-                    .putVec2(minU, minV)
-                    .putVec2(maxU, maxV)
-                    .get()
-            );
-            GpuBuffer samplerInfoBuffer = RenderSystem.getDevice().createBuffer(
-                () -> "watut SamplerInfo", 128,
-                Std140Builder.onStack(stack, 16)
-                    .putVec2((float) widthScaledDown, (float) heightScaledDown)
-                    .putVec2((float) inputView.getWidth(0), (float) inputView.getHeight(0))
-                    .get()
-            );
-
-            RenderSystem.backupProjectionMatrix();
+        RenderSystem.backupProjectionMatrix();
+        try {
             RenderSystem.setProjectionMatrix(projBuffer.slice(), ProjectionType.ORTHOGRAPHIC);
-            try (RenderPass renderPass = RenderSystem.getDevice().createCommandEncoder()
-                    .createRenderPass(() -> "WATUT blit", outputView, OptionalInt.of(0))) {
+            try (RenderPass renderPass = encoder.createRenderPass(() -> "WATUT blit", outputView, OptionalInt.of(0))) {
                 renderPass.setPipeline(PlayerStatusManagerClient.positionTexBlur.getPipeline());
                 RenderSystem.bindDefaultUniforms(renderPass);
                 renderPass.setUniform("BlurParams", blurParamsBuffer);
@@ -216,59 +294,31 @@ public class ScreenParticleRenderer {
                 renderPass.setIndexBuffer(indexBuffer, seqBuf.type());
                 renderPass.drawIndexed(0, 0, 6, 1);
             }
+        } finally {
             RenderSystem.restoreProjectionMatrix();
-
-            projBuffer.close();
-            blurParamsBuffer.close();
-            samplerInfoBuffer.close();
+            advanceUniformRings();
         }
-    }
-
-    public void innerBlitCustomShader2(int textureID, int p_281399_, int p_283222_, int p_283615_, int p_283430_, int p_281729_, float minU, float maxU, float minV, float maxV) {
-        // Legacy entrypoint kept for compatibility; textureID is ignored in the 1.21.6 GPU API path.
-        innerBlitCustomShader(p_281399_, p_283222_, p_283615_, p_283430_, p_281729_, minU, maxU, minV, maxV);
     }
 
     public void innerBlitCustomShaderHorizontal(int p_281399_, int p_283222_, int p_283615_, int p_283430_, int p_281729_, float minU, float maxU, float minV, float maxV) {
         GpuTextureView inputView = resolveCaptureInputView();
-        GpuTextureView outputView = mainRenderTargetScaledDown.getColorTextureView();
+        GpuTextureView outputView = mainRenderTargetScaledDownIntermediate.getColorTextureView();
         if (inputView == null || outputView == null) return;
 
         RenderSystem.AutoStorageIndexBuffer seqBuf = RenderSystem.getSequentialBuffer(VertexFormat.Mode.QUADS);
         GpuBuffer indexBuffer = seqBuf.getBuffer(6);
         GpuBuffer quadBuffer = RenderSystem.getQuadVertexBuffer();
 
-        float blurLevel = (float)(RenderHelper.xaeroWorldMapTextureID != -1 ? 0 : ConfigServerControlledSyncedToClient.dynamicGuiBlurLevel);
+        float blurLevel = (float)(RenderHelper.xaeroGuiMapCaptureActive ? 0 : ConfigServerControlledSyncedToClient.dynamicGuiBlurLevel);
+        CommandEncoder encoder = RenderSystem.getDevice().createCommandEncoder();
+        GpuBuffer projBuffer = writeProjectionUniformBuffer(encoder);
+        GpuBuffer blurParamsBuffer = writeBlurParamsUniformBuffer(encoder, 0f, blurLevel, minU, minV, maxU, maxV);
+        GpuBuffer samplerInfoBuffer = writeSamplerInfoUniformBuffer(encoder, inputView);
 
-        try (MemoryStack stack = MemoryStack.stackPush()) {
-            GpuBuffer projBuffer = RenderSystem.getDevice().createBuffer(
-                () -> "watut projection", 128,
-                Std140Builder.onStack(stack, RenderSystem.PROJECTION_MATRIX_UBO_SIZE)
-                    .putMat4f(new Matrix4f().setOrtho(0.0f, widthScaledDown, 0.0f, heightScaledDown, 0.1f, 1000.0f))
-                    .get()
-            );
-            GpuBuffer blurParamsBuffer = RenderSystem.getDevice().createBuffer(
-                () -> "watut BlurParams", 128,
-                Std140Builder.onStack(stack, 32)
-                    .putVec2((float) widthScaledDown, (float) heightScaledDown)
-                    .putFloat(0f)
-                    .putFloat(blurLevel)
-                    .putVec2(minU, minV)
-                    .putVec2(maxU, maxV)
-                    .get()
-            );
-            GpuBuffer samplerInfoBuffer = RenderSystem.getDevice().createBuffer(
-                () -> "watut SamplerInfo", 128,
-                Std140Builder.onStack(stack, 16)
-                    .putVec2((float) widthScaledDown, (float) heightScaledDown)
-                    .putVec2((float) inputView.getWidth(0), (float) inputView.getHeight(0))
-                    .get()
-            );
-
-            RenderSystem.backupProjectionMatrix();
+        RenderSystem.backupProjectionMatrix();
+        try {
             RenderSystem.setProjectionMatrix(projBuffer.slice(), ProjectionType.ORTHOGRAPHIC);
-            try (RenderPass renderPass = RenderSystem.getDevice().createCommandEncoder()
-                    .createRenderPass(() -> "WATUT blur horizontal", outputView, OptionalInt.of(0))) {
+            try (RenderPass renderPass = encoder.createRenderPass(() -> "WATUT blur horizontal", outputView, OptionalInt.of(0))) {
                 renderPass.setPipeline(PlayerStatusManagerClient.positionTexBlurHorizontal.getPipeline());
                 RenderSystem.bindDefaultUniforms(renderPass);
                 renderPass.setUniform("BlurParams", blurParamsBuffer);
@@ -278,68 +328,44 @@ public class ScreenParticleRenderer {
                 renderPass.setIndexBuffer(indexBuffer, seqBuf.type());
                 renderPass.drawIndexed(0, 0, 6, 1);
             }
+        } finally {
             RenderSystem.restoreProjectionMatrix();
-
-            projBuffer.close();
-            blurParamsBuffer.close();
-            samplerInfoBuffer.close();
+            advanceUniformRings();
         }
     }
 
     public void innerBlitCustomShaderVertical(int p_281399_, int p_283222_, int p_283615_, int p_283430_, int p_281729_, float p_283247_, float p_282598_, float p_282883_, float p_283017_) {
-        GpuTextureView targetView = mainRenderTargetScaledDown.getColorTextureView();
-        if (targetView == null) return;
+        GpuTextureView inputView = mainRenderTargetScaledDownIntermediate.getColorTextureView();
+        GpuTextureView outputView = mainRenderTargetScaledDown.getColorTextureView();
+        if (inputView == null || outputView == null) return;
 
         RenderSystem.AutoStorageIndexBuffer seqBuf = RenderSystem.getSequentialBuffer(VertexFormat.Mode.QUADS);
         GpuBuffer indexBuffer = seqBuf.getBuffer(6);
         GpuBuffer quadBuffer = RenderSystem.getQuadVertexBuffer();
 
         float radius = (float) ConfigServerControlledSyncedToClient.dynamicGuiSizeRadiusInPixelsToShow;
-        float blurLevel = (float)(RenderHelper.xaeroWorldMapTextureID != -1 ? 0 : ConfigServerControlledSyncedToClient.dynamicGuiBlurLevel);
+        float blurLevel = (float)(RenderHelper.xaeroGuiMapCaptureActive ? 0 : ConfigServerControlledSyncedToClient.dynamicGuiBlurLevel);
+        CommandEncoder encoder = RenderSystem.getDevice().createCommandEncoder();
+        GpuBuffer projBuffer = writeProjectionUniformBuffer(encoder);
+        GpuBuffer blurParamsBuffer = writeBlurParamsUniformBuffer(encoder, radius, blurLevel, 0f, 0f, 1f, 1f);
+        GpuBuffer samplerInfoBuffer = writeSamplerInfoUniformBuffer(encoder, inputView);
 
-        try (MemoryStack stack = MemoryStack.stackPush()) {
-            GpuBuffer projBuffer = RenderSystem.getDevice().createBuffer(
-                () -> "watut projection", 128,
-                Std140Builder.onStack(stack, RenderSystem.PROJECTION_MATRIX_UBO_SIZE)
-                    .putMat4f(new Matrix4f().setOrtho(0.0f, widthScaledDown, 0.0f, heightScaledDown, 0.1f, 1000.0f))
-                    .get()
-            );
-            GpuBuffer blurParamsBuffer = RenderSystem.getDevice().createBuffer(
-                () -> "watut BlurParams", 128,
-                Std140Builder.onStack(stack, 32)
-                    .putVec2((float) widthScaledDown, (float) heightScaledDown)
-                    .putFloat(radius)
-                    .putFloat(blurLevel)
-                    .putVec2(0f, 0f)
-                    .putVec2(1f, 1f)
-                    .get()
-            );
-            GpuBuffer samplerInfoBuffer = RenderSystem.getDevice().createBuffer(
-                () -> "watut SamplerInfo", 128,
-                Std140Builder.onStack(stack, 16)
-                    .putVec2((float) widthScaledDown, (float) heightScaledDown)
-                    .putVec2((float) targetView.getWidth(0), (float) targetView.getHeight(0))
-                    .get()
-            );
-
-            RenderSystem.backupProjectionMatrix();
+        RenderSystem.backupProjectionMatrix();
+        try {
             RenderSystem.setProjectionMatrix(projBuffer.slice(), ProjectionType.ORTHOGRAPHIC);
-            try (RenderPass renderPass = RenderSystem.getDevice().createCommandEncoder()
-                    .createRenderPass(() -> "WATUT blur vertical", targetView, OptionalInt.empty())) {
+            try (RenderPass renderPass = encoder.createRenderPass(() -> "WATUT blur vertical", outputView, OptionalInt.empty())) {
                 renderPass.setPipeline(PlayerStatusManagerClient.positionTexBlurVertical.getPipeline());
                 RenderSystem.bindDefaultUniforms(renderPass);
                 renderPass.setUniform("BlurParams", blurParamsBuffer);
                 renderPass.setUniform("SamplerInfo", samplerInfoBuffer);
-                renderPass.bindSampler("InSampler", targetView);
+                renderPass.bindSampler("InSampler", inputView);
                 renderPass.setVertexBuffer(0, quadBuffer);
                 renderPass.setIndexBuffer(indexBuffer, seqBuf.type());
                 renderPass.drawIndexed(0, 0, 6, 1);
             }
+        } finally {
             RenderSystem.restoreProjectionMatrix();
-
-            projBuffer.close();
-            blurParamsBuffer.close();
-            samplerInfoBuffer.close();
+            advanceUniformRings();
         }
     }
 

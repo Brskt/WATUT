@@ -15,6 +15,7 @@
     "client.TextureAtlasUpload",
     "client.GameRendererResize",
     "client.ParticleEngineMixinFabric",
+    "client.MinecraftAccessor",
     "client.NativeImageAccessor",
     "client.GuiRendererCaptureMixin",
     "client.GameRendererCaptureMixin"

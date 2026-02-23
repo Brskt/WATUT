@@ -11,7 +11,10 @@
     "client.ScreenRenderWithTooltip",
     "client.GameRendererResize",
     "client.ParticleEngineMixin",
-    "client.NativeImageAccessor"
+    "client.MinecraftAccessor",
+    "client.NativeImageAccessor",
+    "client.GuiRendererCaptureMixin",
+    "client.GameRendererCaptureMixin"
   ],
   "mixins": [
     "AbstractContainerMenuDoClick",

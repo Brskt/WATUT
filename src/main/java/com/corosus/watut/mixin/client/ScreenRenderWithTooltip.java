@@ -19,7 +19,7 @@ public abstract class ScreenRenderWithTooltip {
         }
     }*/
 
-    @Inject(method = "renderWithTooltip", at = @At("TAIL"))
+    @Inject(method = "renderWithTooltipAndSubtitles", at = @At("TAIL"))
     private void renderWithTooltipEnd(GuiGraphics pGuiGraphics, int pMouseX, int pMouseY, float pPartialTick, CallbackInfo ci) {
         //avoid recursion
         if (!RenderHelper.performingOwnRender) {

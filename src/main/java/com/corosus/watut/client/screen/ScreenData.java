@@ -66,7 +66,7 @@ public class ScreenData {
                     return cachedRenderType;
                 }
                 // Fallback when texture not yet registered
-                return RenderType.translucentParticle(net.minecraft.client.renderer.texture.TextureAtlas.LOCATION_PARTICLES);
+                return RenderType.entityTranslucent(net.minecraft.client.renderer.texture.TextureAtlas.LOCATION_PARTICLES);
             }
 
             public String toString() {
@@ -90,7 +90,7 @@ public class ScreenData {
                     TRANSLUCENT_PARTICLE_NO_CULL,
                     RenderType.CompositeState.builder()
                             .setTextureState(new RenderStateShard.TextureStateShard(textureLocation, false))
-                            .setOutputState(RenderStateShard.PARTICLES_TARGET)
+                            .setOutputState(RenderStateShard.MAIN_TARGET)
                             .setLightmapState(RenderStateShard.LIGHTMAP)
                             .createCompositeState(false)
             );

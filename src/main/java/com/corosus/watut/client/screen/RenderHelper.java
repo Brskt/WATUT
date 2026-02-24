@@ -8,6 +8,7 @@ import com.corosus.watut.WatutMod;
 import com.corosus.watut.config.ConfigClient;
 import com.corosus.watut.config.ConfigServerControlledSyncedToClient;
 import com.corosus.watut.mixin.client.NativeImageAccessor;
+import com.mojang.logging.LogUtils;
 import com.mojang.blaze3d.buffers.GpuBuffer;
 import com.mojang.blaze3d.systems.CommandEncoder;
 import com.mojang.blaze3d.systems.RenderSystem;
@@ -32,8 +33,11 @@ import java.util.zip.Deflater;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
 import java.util.zip.Inflater;
+import org.slf4j.Logger;
 
 public class RenderHelper {
+    private static final Logger LOGGER = LogUtils.getLogger();
+    private static boolean loggedGuiCapturePrepareFailure = false;
 
     public static boolean performingOwnRender = false;
     public static boolean pendingCapture = false;
@@ -215,7 +219,6 @@ public class RenderHelper {
                 }
 
                 screenData.getImage().upload();
-
                 playerStatus.getScreenData().getIsBufferReady().set(false);
 
             }
@@ -256,8 +259,9 @@ public class RenderHelper {
         if (needsScreenUpdate && !processor.hasWork()) {
             playerStatusLocal.getScreenData().setNeedsNewRenderToPixelData(false);
             ScreenParticleRenderer.getInstance().checkSetup();
-            // In 1.21.6, screen.renderWithTooltip() no longer does GPU work (two-phase rendering).
-            // Build a screen-only GuiRenderState by re-running Screen.renderWithTooltip() into an isolated
+            // In 1.21.6+, Screen.renderWithTooltip*() no longer does GPU work (two-phase rendering).
+            // Build a screen-only GuiRenderState by re-running Screen.renderWithTooltipAndSubtitles()
+            // into an isolated
             // GuiGraphics (CPU-side draw-list generation only). GuiRendererCaptureMixin will render that
             // isolated state to WATUT's offscreen target later in the same frame when fog/uniform buffers exist.
             prepareScreenOnlyCaptureRenderState(pMouseX, pMouseY, pPartialTick);
@@ -284,11 +288,14 @@ public class RenderHelper {
             performingOwnRender = true;
             xaeroGuiMapCaptureActive = isXaeroGuiMap(screen);
 
-            screen.renderWithTooltip(captureGraphics, pMouseX, pMouseY, pPartialTick);
+            screen.renderWithTooltipAndSubtitles(captureGraphics, pMouseX, pMouseY, pPartialTick);
             pendingScreenOnlyCaptureRenderState = captureState;
         } catch (Throwable t) {
             pendingScreenOnlyCaptureRenderState = null;
-            t.printStackTrace();
+            if (!loggedGuiCapturePrepareFailure) {
+                loggedGuiCapturePrepareFailure = true;
+                LOGGER.error("WATUT GUI-only capture state preparation failed (logging once)", t);
+            }
         } finally {
             performingOwnRender = false;
             ScreenParticleRenderer.isRenderingParticleGUI = false;
@@ -322,7 +329,9 @@ public class RenderHelper {
         if (Minecraft.getInstance().level == null || Minecraft.getInstance().player == null) return;
         if (Minecraft.getInstance().screen == null) return;
         boolean useXaeroMainTargetFallback = xaeroGuiMapCaptureActive;
-        if (!guiOnlyCapturePrepared && !useXaeroMainTargetFallback) return;
+        if (!guiOnlyCapturePrepared && !useXaeroMainTargetFallback) {
+            return;
+        }
 
         ScreenParticleRenderer spr = ScreenParticleRenderer.getInstance();
         spr.checkSetup();

@@ -64,7 +64,9 @@ public abstract class GuiRendererCaptureMixin {
         ScreenParticleRenderer spr = ScreenParticleRenderer.getInstance();
         spr.checkSetup();
         GuiRenderState screenOnlyState = RenderHelper.consumePendingScreenOnlyCaptureRenderState();
-        if (screenOnlyState == null) return;
+        if (screenOnlyState == null) {
+            return;
+        }
 
         try {
             // Reuse the existing GuiRenderer instance (Fabric hooks constructor and rejects late instances).

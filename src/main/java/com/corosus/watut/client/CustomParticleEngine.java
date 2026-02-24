@@ -19,13 +19,14 @@ import net.minecraft.client.renderer.texture.SpriteLoader;
 import net.minecraft.client.renderer.texture.TextureAtlas;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
 import net.minecraft.client.renderer.texture.TextureManager;
-import net.minecraft.core.particles.ParticleGroup;
+import net.minecraft.core.particles.ParticleLimit;
 import net.minecraft.core.particles.ParticleOptions;
 import net.minecraft.resources.FileToIdConverter;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.packs.resources.PreparableReloadListener;
 import net.minecraft.server.packs.resources.Resource;
 import net.minecraft.server.packs.resources.ResourceManager;
+import net.minecraft.server.packs.metadata.MetadataSectionType;
 import net.minecraft.util.GsonHelper;
 import net.minecraft.util.RandomSource;
 import net.minecraft.util.profiling.Profiler;
@@ -62,7 +63,7 @@ public class CustomParticleEngine implements PreparableReloadListener {
    private final Queue<ParticleRotating> particlesToAdd = Queues.newArrayDeque();
    private final Map<ResourceLocation, CustomParticleEngine.MutableSpriteSet> spriteSets = Maps.newHashMap();
    public final TextureAtlas textureAtlas;
-   private final Object2IntOpenHashMap<ParticleGroup> trackedParticleCounts = new Object2IntOpenHashMap<>();
+   private final Object2IntOpenHashMap<ParticleLimit> trackedParticleCounts = new Object2IntOpenHashMap<>();
 
    public CustomParticleEngine(ClientLevel p_107299_, TextureManager p_107300_) {
       this.textureAtlas = new TextureAtlas(TextureAtlas.LOCATION_PARTICLES);
@@ -93,8 +94,12 @@ public class CustomParticleEngine implements PreparableReloadListener {
 
    @Override
    public CompletableFuture<Void> reload(
-           PreparableReloadListener.PreparationBarrier barrier, ResourceManager manager, Executor backgroundExecutor, Executor gameExecutor
+           PreparableReloadListener.SharedState sharedState,
+           Executor backgroundExecutor,
+           PreparableReloadListener.PreparationBarrier barrier,
+           Executor gameExecutor
    ) {
+      ResourceManager manager = sharedState.resourceManager();
       record ParticleDefinition(ResourceLocation id, Optional<List<ResourceLocation>> sprites) {
       }
 
@@ -118,8 +123,8 @@ public class CustomParticleEngine implements PreparableReloadListener {
                       }
               );
       CompletableFuture<SpriteLoader.Preparations> completablefuture1 = SpriteLoader.create(this.textureAtlas)
-              .loadAndStitch(manager, PARTICLES_ATLAS_INFO, 0, backgroundExecutor)
-              .thenCompose(SpriteLoader.Preparations::waitForUpload);
+              .loadAndStitch(manager, PARTICLES_ATLAS_INFO, 0, backgroundExecutor, Set.<MetadataSectionType<?>>of())
+              .thenCompose(preparations -> preparations.readyForUpload().thenApply(v -> preparations));
       return CompletableFuture.allOf(completablefuture1, completablefuture).thenCompose(barrier::wait).thenAcceptAsync(p_372548_ -> {
          this.clearParticles();
          ProfilerFiller profilerfiller = Profiler.get();
@@ -178,7 +183,7 @@ public class CustomParticleEngine implements PreparableReloadListener {
    }
 
    public void add(ParticleRotating p_107345_) {
-      Optional<ParticleGroup> optional = p_107345_.getParticleGroup();
+      Optional<ParticleLimit> optional = p_107345_.getParticleLimit();
       if (optional.isPresent()) {
          if (this.hasSpaceInParticleLimit(optional.get())) {
             this.particlesToAdd.add(p_107345_);
@@ -228,7 +233,7 @@ public class CustomParticleEngine implements PreparableReloadListener {
             Particle particle = iterator.next();
             this.tickParticle(particle);
             if (!particle.isAlive()) {
-               particle.getParticleGroup().ifPresent((p_172289_) -> {
+               particle.getParticleLimit().ifPresent((p_172289_) -> {
                   this.updateCount(p_172289_, -1);
                });
                iterator.remove();
@@ -238,7 +243,7 @@ public class CustomParticleEngine implements PreparableReloadListener {
 
    }
 
-   private void updateCount(ParticleGroup p_172282_, int p_172283_) {
+   private void updateCount(ParticleLimit p_172282_, int p_172283_) {
       this.trackedParticleCounts.addTo(p_172282_, p_172283_);
    }
 
@@ -249,14 +254,13 @@ public class CustomParticleEngine implements PreparableReloadListener {
          CrashReport crashreport = CrashReport.forThrowable(throwable, "Ticking Particle");
          CrashReportCategory crashreportcategory = crashreport.addCategory("Particle being ticked");
          crashreportcategory.setDetail("Particle", p_107394_::toString);
-         crashreportcategory.setDetail("Particle Type", p_107394_.getRenderType()::toString);
+         crashreportcategory.setDetail("Particle Type", p_107394_.getGroup()::toString);
          throw new ReportedException(crashreport);
       }
    }
 
    public void render(Camera camera, float partialTick, MultiBufferSource.BufferSource bufferSource) {
       // Depth testing is now managed by RenderPipeline in 1.21.5
-
       /**
        * ParticleItem using special item/terrain pickup breaks particle render state so we just make sure to render it last
        * - related: see classic forge issue of the item pickup particle breaking depth testing and darkening particles
@@ -296,7 +300,7 @@ public class CustomParticleEngine implements PreparableReloadListener {
          if (queue != null && !queue.isEmpty()) {
             RenderType renderType = particlerendertype.getRenderType();
             VertexConsumer vertexConsumer = bufferSource.getBuffer(renderType);
-            for (Particle particle : queue) {
+            for (ParticleRotating particle : queue) {
                //if (frustum != null && !frustum.isVisible(particle.getRenderBoundingBox(partialTick))) continue;
                try {
                   particle.render(vertexConsumer, camera, partialTick);
@@ -322,8 +326,8 @@ public class CustomParticleEngine implements PreparableReloadListener {
       return String.valueOf(this.particles.values().stream().mapToInt(Collection::size).sum());
    }
 
-   private boolean hasSpaceInParticleLimit(ParticleGroup p_172280_) {
-      return this.trackedParticleCounts.getInt(p_172280_) < p_172280_.getLimit();
+   private boolean hasSpaceInParticleLimit(ParticleLimit p_172280_) {
+      return this.trackedParticleCounts.getInt(p_172280_) < p_172280_.limit();
    }
 
    private void clearParticles() {
@@ -342,6 +346,11 @@ public class CustomParticleEngine implements PreparableReloadListener {
 
       public TextureAtlasSprite get(RandomSource p_233889_) {
          return this.sprites.get(p_233889_.nextInt(this.sprites.size()));
+      }
+
+      @Override
+      public TextureAtlasSprite first() {
+         return this.sprites.get(0);
       }
 
       public void rebind(List<TextureAtlasSprite> p_107416_) {

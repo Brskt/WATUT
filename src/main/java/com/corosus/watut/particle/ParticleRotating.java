@@ -6,20 +6,22 @@ import com.mojang.blaze3d.pipeline.RenderPipeline;
 import com.mojang.blaze3d.vertex.*;
 import com.mojang.math.Axis;
 import net.minecraft.client.Camera;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.particle.ParticleRenderType;
-import net.minecraft.client.particle.TextureSheetParticle;
+import net.minecraft.client.particle.SingleQuadParticle;
 import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.client.renderer.RenderStateShard;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.texture.TextureAtlas;
+import net.minecraft.client.renderer.texture.TextureAtlasSprite;
 import net.minecraft.util.Mth;
 import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.Nullable;
 import org.joml.Quaternionf;
 import org.joml.Vector3f;
 
-public abstract class ParticleRotating extends TextureSheetParticle {
+public abstract class ParticleRotating extends SingleQuadParticle {
 
     public boolean useCustomRotation = true;
     public float prevRotationYaw;
@@ -53,7 +55,8 @@ public abstract class ParticleRotating extends TextureSheetParticle {
     public static ParticleRenderTypeOld CUSTOM = new ParticleRenderTypeOld() {
         @Override
         public RenderType getRenderType() {
-            return RenderType.opaqueParticle(TextureAtlas.LOCATION_PARTICLES);
+            // Fallback path kept for compatibility; this render type is not the primary path in WATUT.
+            return RenderType.entityTranslucent(TextureAtlas.LOCATION_PARTICLES);
         }
 
         @Override
@@ -72,7 +75,7 @@ public abstract class ParticleRotating extends TextureSheetParticle {
             TRANSLUCENT_PARTICLE_NO_CULL_PIPELINE,
             RenderType.CompositeState.builder()
                     .setTextureState(new RenderStateShard.TextureStateShard(TextureAtlas.LOCATION_PARTICLES, false))
-                    .setOutputState(RenderStateShard.PARTICLES_TARGET)
+                    .setOutputState(RenderStateShard.MAIN_TARGET)
                     .setLightmapState(RenderStateShard.LIGHTMAP)
                     .createCompositeState(false));
 
@@ -93,7 +96,7 @@ public abstract class ParticleRotating extends TextureSheetParticle {
             TRANSLUCENT_PARTICLE_NO_CULL_NO_DEPTH_PIPELINE,
             RenderType.CompositeState.builder()
                     .setTextureState(new RenderStateShard.TextureStateShard(TextureAtlas.LOCATION_BLOCKS, false))
-                    .setOutputState(RenderStateShard.PARTICLES_TARGET)
+                    .setOutputState(RenderStateShard.MAIN_TARGET)
                     .setLightmapState(RenderStateShard.LIGHTMAP)
                     .createCompositeState(false));
 
@@ -133,7 +136,11 @@ public abstract class ParticleRotating extends TextureSheetParticle {
     }
 
     public ParticleRotating(ClientLevel pLevel, double pX, double pY, double pZ) {
-        super(pLevel, pX, pY, pZ);
+        super(pLevel, pX, pY, pZ, getMissingParticleSprite());
+    }
+
+    private static TextureAtlasSprite getMissingParticleSprite() {
+        return ((TextureAtlas) Minecraft.getInstance().getTextureManager().getTexture(TextureAtlas.LOCATION_PARTICLES)).missingSprite();
     }
 
     public void setQuadSize(float size) {
@@ -144,8 +151,14 @@ public abstract class ParticleRotating extends TextureSheetParticle {
         this.alpha = alpha;
     }
 
-    public ParticleRenderType getRenderType() {
-        return null;
+    @Override
+    public ParticleRenderType getGroup() {
+        return ParticleRenderType.SINGLE_QUADS;
+    }
+
+    @Override
+    protected Layer getLayer() {
+        return Layer.TRANSLUCENT;
     }
 
     public ParticleRenderTypeOld getRenderTypeOld() {

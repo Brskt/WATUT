@@ -2,7 +2,7 @@ plugins {
     id 'idea'
     id 'java-library'
     id 'maven-publish'
-    id 'net.neoforged.moddev' version '2.0.78'
+    id 'net.neoforged.moddev' version '2.0.140'
     id "com.hypherionmc.modutils.modpublisher" version "2.1.6"
 }
 
@@ -20,6 +20,9 @@ group = maven_group
 
 repositories {
     mavenLocal()
+    maven {
+        url "https://ldtteam.jfrog.io/artifactory/parchmentmc-internal"
+    }
     maven {
         url "https://maven.parchmentmc.org"
     }

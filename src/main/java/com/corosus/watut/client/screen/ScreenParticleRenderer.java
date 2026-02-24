@@ -4,7 +4,6 @@ import com.corosus.coroutil.util.CULog;
 import com.corosus.watut.PlayerStatusManagerClient;
 import com.corosus.watut.config.ConfigServerControlledSyncedToClient;
 import com.corosus.watut.mixin.client.MinecraftAccessor;
-import com.mojang.blaze3d.ProjectionType;
 import com.mojang.blaze3d.buffers.GpuBuffer;
 import com.mojang.blaze3d.pipeline.MainTarget;
 import com.mojang.blaze3d.pipeline.RenderTarget;
@@ -13,12 +12,10 @@ import com.mojang.blaze3d.systems.RenderPass;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.buffers.Std140Builder;
 import com.mojang.blaze3d.textures.GpuTextureView;
-import com.mojang.blaze3d.vertex.VertexFormat;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.MappableRingBuffer;
 import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.resources.ResourceLocation;
-import org.joml.Matrix4f;
 
 import java.util.OptionalInt;
 
@@ -51,7 +48,6 @@ public class ScreenParticleRenderer {
 
     // Set temporarily during captureScreenAfterGuiRender to override the input source for blur passes
     private GpuTextureView captureSourceOverrideView = null;
-    private MappableRingBuffer projectionUniformRing;
     private MappableRingBuffer blurParamsUniformRing;
     private MappableRingBuffer samplerInfoUniformRing;
 
@@ -183,13 +179,6 @@ public class ScreenParticleRenderer {
     }
 
     private void ensureUniformRings() {
-        if (projectionUniformRing == null) {
-            projectionUniformRing = new MappableRingBuffer(
-                    () -> "watut Projection",
-                    UNIFORM_RING_BUFFER_USAGE,
-                    RenderSystem.PROJECTION_MATRIX_UBO_SIZE
-            );
-        }
         if (blurParamsUniformRing == null) {
             blurParamsUniformRing = new MappableRingBuffer(
                     () -> "watut BlurParams",
@@ -207,10 +196,6 @@ public class ScreenParticleRenderer {
     }
 
     private void closeUniformRings() {
-        if (projectionUniformRing != null) {
-            projectionUniformRing.close();
-            projectionUniformRing = null;
-        }
         if (blurParamsUniformRing != null) {
             blurParamsUniformRing.close();
             blurParamsUniformRing = null;
@@ -219,16 +204,6 @@ public class ScreenParticleRenderer {
             samplerInfoUniformRing.close();
             samplerInfoUniformRing = null;
         }
-    }
-
-    private GpuBuffer writeProjectionUniformBuffer(CommandEncoder encoder) {
-        ensureUniformRings();
-        GpuBuffer buffer = projectionUniformRing.currentBuffer();
-        try (GpuBuffer.MappedView mappedView = encoder.mapBuffer(buffer, false, true)) {
-            Std140Builder.intoBuffer(mappedView.data())
-                    .putMat4f(new Matrix4f().setOrtho(0.0f, widthScaledDown, 0.0f, heightScaledDown, 0.1f, 1000.0f));
-        }
-        return buffer;
     }
 
     private GpuBuffer writeBlurParamsUniformBuffer(CommandEncoder encoder, float radius, float blurLevel, float minU, float minV, float maxU, float maxV) {
@@ -257,9 +232,6 @@ public class ScreenParticleRenderer {
     }
 
     private void advanceUniformRings() {
-        if (projectionUniformRing != null) {
-            projectionUniformRing.rotate();
-        }
         if (blurParamsUniformRing != null) {
             blurParamsUniformRing.rotate();
         }
@@ -273,29 +245,20 @@ public class ScreenParticleRenderer {
         GpuTextureView outputView = mainRenderTargetScaledDown.getColorTextureView();
         if (inputView == null || outputView == null) return;
 
-        RenderSystem.AutoStorageIndexBuffer seqBuf = RenderSystem.getSequentialBuffer(VertexFormat.Mode.QUADS);
-        GpuBuffer indexBuffer = seqBuf.getBuffer(6);
-        GpuBuffer quadBuffer = RenderSystem.getQuadVertexBuffer();
         CommandEncoder encoder = RenderSystem.getDevice().createCommandEncoder();
-        GpuBuffer projBuffer = writeProjectionUniformBuffer(encoder);
         GpuBuffer blurParamsBuffer = writeBlurParamsUniformBuffer(encoder, 0f, 0f, minU, minV, maxU, maxV);
         GpuBuffer samplerInfoBuffer = writeSamplerInfoUniformBuffer(encoder, inputView);
 
-        RenderSystem.backupProjectionMatrix();
         try {
-            RenderSystem.setProjectionMatrix(projBuffer.slice(), ProjectionType.ORTHOGRAPHIC);
             try (RenderPass renderPass = encoder.createRenderPass(() -> "WATUT blit", outputView, OptionalInt.of(0))) {
                 renderPass.setPipeline(PlayerStatusManagerClient.positionTexBlur.getPipeline());
                 RenderSystem.bindDefaultUniforms(renderPass);
                 renderPass.setUniform("BlurParams", blurParamsBuffer);
                 renderPass.setUniform("SamplerInfo", samplerInfoBuffer);
                 renderPass.bindSampler("InSampler", inputView);
-                renderPass.setVertexBuffer(0, quadBuffer);
-                renderPass.setIndexBuffer(indexBuffer, seqBuf.type());
-                renderPass.drawIndexed(0, 0, 6, 1);
+                renderPass.draw(0, 3);
             }
         } finally {
-            RenderSystem.restoreProjectionMatrix();
             advanceUniformRings();
         }
     }
@@ -305,31 +268,21 @@ public class ScreenParticleRenderer {
         GpuTextureView outputView = mainRenderTargetScaledDownIntermediate.getColorTextureView();
         if (inputView == null || outputView == null) return;
 
-        RenderSystem.AutoStorageIndexBuffer seqBuf = RenderSystem.getSequentialBuffer(VertexFormat.Mode.QUADS);
-        GpuBuffer indexBuffer = seqBuf.getBuffer(6);
-        GpuBuffer quadBuffer = RenderSystem.getQuadVertexBuffer();
-
         float blurLevel = (float)(RenderHelper.xaeroGuiMapCaptureActive ? 0 : ConfigServerControlledSyncedToClient.dynamicGuiBlurLevel);
         CommandEncoder encoder = RenderSystem.getDevice().createCommandEncoder();
-        GpuBuffer projBuffer = writeProjectionUniformBuffer(encoder);
         GpuBuffer blurParamsBuffer = writeBlurParamsUniformBuffer(encoder, 0f, blurLevel, minU, minV, maxU, maxV);
         GpuBuffer samplerInfoBuffer = writeSamplerInfoUniformBuffer(encoder, inputView);
 
-        RenderSystem.backupProjectionMatrix();
         try {
-            RenderSystem.setProjectionMatrix(projBuffer.slice(), ProjectionType.ORTHOGRAPHIC);
             try (RenderPass renderPass = encoder.createRenderPass(() -> "WATUT blur horizontal", outputView, OptionalInt.of(0))) {
                 renderPass.setPipeline(PlayerStatusManagerClient.positionTexBlurHorizontal.getPipeline());
                 RenderSystem.bindDefaultUniforms(renderPass);
                 renderPass.setUniform("BlurParams", blurParamsBuffer);
                 renderPass.setUniform("SamplerInfo", samplerInfoBuffer);
                 renderPass.bindSampler("InSampler", inputView);
-                renderPass.setVertexBuffer(0, quadBuffer);
-                renderPass.setIndexBuffer(indexBuffer, seqBuf.type());
-                renderPass.drawIndexed(0, 0, 6, 1);
+                renderPass.draw(0, 3);
             }
         } finally {
-            RenderSystem.restoreProjectionMatrix();
             advanceUniformRings();
         }
     }
@@ -339,32 +292,22 @@ public class ScreenParticleRenderer {
         GpuTextureView outputView = mainRenderTargetScaledDown.getColorTextureView();
         if (inputView == null || outputView == null) return;
 
-        RenderSystem.AutoStorageIndexBuffer seqBuf = RenderSystem.getSequentialBuffer(VertexFormat.Mode.QUADS);
-        GpuBuffer indexBuffer = seqBuf.getBuffer(6);
-        GpuBuffer quadBuffer = RenderSystem.getQuadVertexBuffer();
-
         float radius = (float) ConfigServerControlledSyncedToClient.dynamicGuiSizeRadiusInPixelsToShow;
         float blurLevel = (float)(RenderHelper.xaeroGuiMapCaptureActive ? 0 : ConfigServerControlledSyncedToClient.dynamicGuiBlurLevel);
         CommandEncoder encoder = RenderSystem.getDevice().createCommandEncoder();
-        GpuBuffer projBuffer = writeProjectionUniformBuffer(encoder);
         GpuBuffer blurParamsBuffer = writeBlurParamsUniformBuffer(encoder, radius, blurLevel, 0f, 0f, 1f, 1f);
         GpuBuffer samplerInfoBuffer = writeSamplerInfoUniformBuffer(encoder, inputView);
 
-        RenderSystem.backupProjectionMatrix();
         try {
-            RenderSystem.setProjectionMatrix(projBuffer.slice(), ProjectionType.ORTHOGRAPHIC);
             try (RenderPass renderPass = encoder.createRenderPass(() -> "WATUT blur vertical", outputView, OptionalInt.empty())) {
                 renderPass.setPipeline(PlayerStatusManagerClient.positionTexBlurVertical.getPipeline());
                 RenderSystem.bindDefaultUniforms(renderPass);
                 renderPass.setUniform("BlurParams", blurParamsBuffer);
                 renderPass.setUniform("SamplerInfo", samplerInfoBuffer);
                 renderPass.bindSampler("InSampler", inputView);
-                renderPass.setVertexBuffer(0, quadBuffer);
-                renderPass.setIndexBuffer(indexBuffer, seqBuf.type());
-                renderPass.drawIndexed(0, 0, 6, 1);
+                renderPass.draw(0, 3);
             }
         } finally {
-            RenderSystem.restoreProjectionMatrix();
             advanceUniformRings();
         }
     }

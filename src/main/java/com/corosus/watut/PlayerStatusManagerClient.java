@@ -22,7 +22,7 @@ import net.minecraft.client.multiplayer.PlayerInfo;
 import net.minecraft.client.player.AbstractClientPlayer;
 import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.client.renderer.entity.LivingEntityRenderer;
-import net.minecraft.client.renderer.entity.state.PlayerRenderState;
+import net.minecraft.client.renderer.entity.state.AvatarRenderState;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.NbtOps;
@@ -141,7 +141,7 @@ public class PlayerStatusManagerClient extends PlayerStatusManager {
         //CULog.dbg("screen " + Minecraft.getInstance().screen);
 
         Screen screen = Minecraft.getInstance().screen;
-        boolean guiBlacklisted = screen instanceof ReceivingLevelScreen;
+        boolean guiBlacklisted = screen instanceof LevelLoadingScreen;
 
         boolean validGui = !guiBlacklisted && (screen != null && selfPlayerStatus.getPlayerGuiState() != PlayerStatus.PlayerGuiState.NONE && selfPlayerStatus.getPlayerGuiState() != PlayerStatus.PlayerGuiState.CHAT_SCREEN);
         boolean stillActiveInGUI = selfPlayerStatus.getTicksSinceLastAction() < (20 * 5);
@@ -608,7 +608,7 @@ public class PlayerStatusManagerClient extends PlayerStatusManager {
                 if (info != null) {
                     GameProfile profile = info.getProfile();
                     if (profile != null) {
-                        str += profile.getName() + ", ";
+                        str += profile.name() + ", ";
                     }
                 }
             }
@@ -843,8 +843,8 @@ public class PlayerStatusManagerClient extends PlayerStatusManager {
                 if (!(playerStatus.getParticle() instanceof ParticleAnimated)) {
                     particle.setQuadSize((float) quadSize);
 
-                    if (Minecraft.getInstance().cameraEntity != null) {
-                        double distToCamera = Minecraft.getInstance().cameraEntity.distanceTo(player);
+                    if (Minecraft.getInstance().getCameraEntity() != null) {
+                        double distToCamera = Minecraft.getInstance().getCameraEntity().distanceTo(player);
                         double distToCameraCapped = Math.max(3F, Math.min(10F, distToCamera));
                         double distToCameraCapped2 = Math.max(3F, Math.min(6F, distToCamera));
                         //Watut.dbg(distToCamera);
@@ -886,21 +886,19 @@ public class PlayerStatusManagerClient extends PlayerStatusManager {
 
     public boolean renderPingIconHook(PlayerTabOverlay playerTabOverlay, GuiGraphics pGuiGraphics, int p_281809_, int p_282801_, int pY, PlayerInfo pPlayerInfo) {
         if (Minecraft.getInstance().particleEngine == null || pPlayerInfo == null || pPlayerInfo.getProfile() == null || !ConfigClient.showIdleStatesInPlayerList || !ConfigServerControlledSyncedToClient.showIdleStatesInPlayerList) return false;
-        PlayerStatus playerStatus = getStatus(pPlayerInfo.getProfile().getId());
+        PlayerStatus playerStatus = getStatus(pPlayerInfo.getProfile().id());
         if (playerStatus.isIdle()) {
             pGuiGraphics.pose().pushMatrix();
             pGuiGraphics.pose().translate(0.0F, 0.0F);
             TextureAtlasSprite sprite = ParticleRegistry.idle.getSprite();
-            int x = (int) (Minecraft.getInstance().particleEngine.textureAtlas.width * sprite.getU0());
-            int y = (int) (Minecraft.getInstance().particleEngine.textureAtlas.height * sprite.getV0());
-            pGuiGraphics.blit(RenderPipelines.GUI_TEXTURED, sprite.atlasLocation(), p_282801_ + p_281809_ - 11, pY, x, y, 10, 8, Minecraft.getInstance().particleEngine.textureAtlas.width, Minecraft.getInstance().particleEngine.textureAtlas.height);
+            pGuiGraphics.blitSprite(RenderPipelines.GUI_TEXTURED, sprite, p_282801_ + p_281809_ - 11, pY, 10, 8);
             pGuiGraphics.pose().popMatrix();
             return true;
         }
         return false;
     }
 
-    public void setupRotationsHook(EntityModel model, PlayerRenderState renderState) {
+    public void setupRotationsHook(EntityModel model, AvatarRenderState renderState) {
         //CULog.dbg("name: " + renderState.id);
         //LivingEntityRenderer l;
         //renderState.id;
@@ -1459,7 +1457,6 @@ public class PlayerStatusManagerClient extends PlayerStatusManager {
                     .orElse(ItemStack.EMPTY);
             ParticleItem particleItem = new ParticleItem(Minecraft.getInstance().level, 1, itemStack,
                     Minecraft.getInstance().renderBuffers(),
-                    Minecraft.getInstance().getEntityRenderDispatcher(),
                     data.getFloat(WatutNetworking.NBTDataItemTransferFromX).orElse(0f),
                     data.getFloat(WatutNetworking.NBTDataItemTransferFromY).orElse(0f),
                     data.getFloat(WatutNetworking.NBTDataItemTransferFromZ).orElse(0f),

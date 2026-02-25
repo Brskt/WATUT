@@ -8,6 +8,11 @@ import com.corosus.watut.client.screen.ScreenData;
 import com.corosus.watut.client.screen.ScreenParticleRenderer;
 import com.corosus.watut.config.*;
 import com.corosus.watut.math.Lerpables;
+import com.corosus.watut.mixin.client.AbstractCommandBlockEditScreenAccessor;
+import com.corosus.watut.mixin.client.AbstractSignEditScreenAccessor;
+import com.corosus.watut.mixin.client.BookEditScreenAccessor;
+import com.corosus.watut.mixin.client.ChatScreenAccessor;
+import com.corosus.watut.mixin.client.TextFieldHelperAccessor;
 import com.corosus.watut.particle.*;
 import com.ibm.icu.impl.Pair;
 import com.mojang.authlib.GameProfile;
@@ -16,6 +21,7 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.PlayerTabOverlay;
 import net.minecraft.client.gui.screens.*;
 import net.minecraft.client.gui.screens.inventory.*;
+import net.minecraft.client.gui.font.TextFieldHelper;
 import net.minecraft.client.model.EntityModel;
 import net.minecraft.client.model.player.PlayerModel;
 import net.minecraft.client.multiplayer.ClientLevel;
@@ -357,14 +363,17 @@ public class PlayerStatusManagerClient extends PlayerStatusManager {
         //update typing state
         String chatText = "";
         if (mc.screen instanceof ChatScreen chatScreen) {
-            chatText = chatScreen.input.getValue();
+            chatText = ((ChatScreenAccessor) chatScreen).watut$getInput().getValue();
         } else if (mc.screen instanceof BookEditScreen bookEditScreen) {
-            chatText = bookEditScreen.page.getValue();
+            chatText = ((BookEditScreenAccessor) bookEditScreen).watut$getPage().getValue();
         } else if (mc.screen instanceof AbstractSignEditScreen abstractSignEditScreen) {
-            chatText = abstractSignEditScreen.signField.getMessageFn.get();
+            TextFieldHelper signField = ((AbstractSignEditScreenAccessor) abstractSignEditScreen).watut$getSignField();
+            if (signField != null) {
+                chatText = ((TextFieldHelperAccessor) signField).watut$getMessageFn().get();
+            }
         } else if (mc.screen instanceof AbstractCommandBlockEditScreen abstractCommandBlockEditScreen) {
             //note, the first tick this is open, chatText is blank, next tick contains the correct data
-            chatText = abstractCommandBlockEditScreen.commandEdit.getValue();
+            chatText = ((AbstractCommandBlockEditScreenAccessor) abstractCommandBlockEditScreen).watut$getCommandEdit().getValue();
         }
 
         if (checkIfTyping(chatText, player)) {

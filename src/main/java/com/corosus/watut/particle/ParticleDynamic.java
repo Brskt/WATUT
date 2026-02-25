@@ -111,7 +111,7 @@ public class ParticleDynamic extends ParticleRotating {
         float v0 = 0;
         float v1 = 1;
 
-        int j = this.getLightColor(pPartialTicks);
+        int j = this.getPackedLightCompat(pPartialTicks);
         float extraDark = this.getBrightness();
         pBuffer.addVertex(avector3f[0].x(), avector3f[0].y(), avector3f[0].z()).setUv(u1, v1).setColor(this.rCol, this.gCol, this.bCol, this.alpha).setLight(j);
         pBuffer.addVertex(avector3f[1].x(), avector3f[1].y(), avector3f[1].z()).setUv(u1, v0).setColor(this.rCol, this.gCol, this.bCol, this.alpha).setLight(j);

@@ -1,6 +1,9 @@
 package com.corosus.watut.particle;
 
 import com.corosus.watut.client.ParticleRenderTypeOld;
+import com.corosus.watut.client.RenderPipelineCompat;
+import com.corosus.watut.mixin.client.RenderPipelinesAccessor;
+import com.corosus.watut.mixin.client.RenderTypeAccessor;
 import com.mojang.blaze3d.pipeline.BlendFunction;
 import com.mojang.blaze3d.pipeline.RenderPipeline;
 import com.mojang.blaze3d.vertex.*;
@@ -23,7 +26,12 @@ import org.jetbrains.annotations.Nullable;
 import org.joml.Quaternionf;
 import org.joml.Vector3f;
 
+import java.lang.reflect.Method;
+
 public abstract class ParticleRotating extends SingleQuadParticle {
+    private static Method watutGetLightCoordsMethod;
+    private static Method watutGetLightColorMethod;
+    private static boolean watutCheckedLightMethods;
 
     public boolean useCustomRotation = true;
     public float prevRotationYaw;
@@ -38,21 +46,11 @@ public abstract class ParticleRotating extends SingleQuadParticle {
     public int despawnCountdown = 40;
 
     // Custom pipeline with cull=false — replaces the old begin()/end() GL state that called glDisable(GL_CULL_FACE)
-    private static final RenderPipeline TRANSLUCENT_PARTICLE_NO_CULL_PIPELINE = RenderPipelines.register(
-            RenderPipeline.builder(RenderPipelines.PARTICLE_SNIPPET)
-                    .withLocation("pipeline/watut_translucent_particle_no_cull_particles")
-                    .withBlend(BlendFunction.TRANSLUCENT)
-                    .withCull(false)
-                    .build());
+    private static final RenderPipeline TRANSLUCENT_PARTICLE_NO_CULL_PIPELINE = RenderPipelinesAccessor.watut$invokeRegister(
+            createTranslucentParticleNoCullPipeline());
 
-    private static final RenderPipeline TRANSLUCENT_PARTICLE_NO_CULL_NO_DEPTH_PIPELINE = RenderPipelines.register(
-            RenderPipeline.builder(RenderPipelines.PARTICLE_SNIPPET)
-                    .withLocation("pipeline/watut_translucent_particle_no_cull_no_depth")
-                    .withBlend(BlendFunction.TRANSLUCENT)
-                    .withCull(false)
-                    .withDepthTestFunction(com.mojang.blaze3d.platform.DepthTestFunction.NO_DEPTH_TEST)
-                    .withDepthWrite(false)
-                    .build());
+    private static final RenderPipeline TRANSLUCENT_PARTICLE_NO_CULL_NO_DEPTH_PIPELINE = RenderPipelinesAccessor.watut$invokeRegister(
+            createTranslucentParticleNoCullNoDepthPipeline());
 
     public static ParticleRenderTypeOld CUSTOM = new ParticleRenderTypeOld() {
         @Override
@@ -71,7 +69,7 @@ public abstract class ParticleRotating extends SingleQuadParticle {
         }
     };
 
-    private static final RenderType TRANSLUCENT_PARTICLE_NO_CULL_RENDER_TYPE = RenderType.create(
+    private static final RenderType TRANSLUCENT_PARTICLE_NO_CULL_RENDER_TYPE = RenderTypeAccessor.watut$invokeCreate(
             "watut_translucent_particle_no_cull_particles",
             RenderSetup.builder(TRANSLUCENT_PARTICLE_NO_CULL_PIPELINE)
                     .bufferSize(1536)
@@ -91,7 +89,7 @@ public abstract class ParticleRotating extends SingleQuadParticle {
         }
     };
 
-    private static final RenderType TERRAIN_TRANSLUCENT_NO_CULL_RENDER_TYPE = RenderType.create(
+    private static final RenderType TERRAIN_TRANSLUCENT_NO_CULL_RENDER_TYPE = RenderTypeAccessor.watut$invokeCreate(
             "watut_translucent_particle_no_cull_terrain",
             RenderSetup.builder(TRANSLUCENT_PARTICLE_NO_CULL_NO_DEPTH_PIPELINE)
                     .bufferSize(1536)
@@ -110,6 +108,23 @@ public abstract class ParticleRotating extends SingleQuadParticle {
             return "TERRAIN_SHEET_TRANSLUCENT_NO_FACE_CULL";
         }
     };
+
+    private static RenderPipeline createTranslucentParticleNoCullPipeline() {
+        RenderPipeline.Builder builder = RenderPipeline.builder(RenderPipelinesAccessor.watut$getParticleSnippet())
+                .withLocation("pipeline/watut_translucent_particle_no_cull_particles")
+                .withCull(false);
+        RenderPipelineCompat.withTranslucentColorTarget(builder);
+        return builder.build();
+    }
+
+    private static RenderPipeline createTranslucentParticleNoCullNoDepthPipeline() {
+        RenderPipeline.Builder builder = RenderPipeline.builder(RenderPipelinesAccessor.watut$getParticleSnippet())
+                .withLocation("pipeline/watut_translucent_particle_no_cull_no_depth")
+                .withCull(false);
+        RenderPipelineCompat.withTranslucentColorTarget(builder);
+        RenderPipelineCompat.withAlwaysPassNoDepthWrite(builder);
+        return builder.build();
+    }
 
     @Override
     public void tick() {
@@ -200,7 +215,7 @@ public abstract class ParticleRotating extends SingleQuadParticle {
         float v0 = this.getV0();
         float v1 = this.getV1();
 
-        int j = this.getLightColor(pPartialTicks);
+        int j = this.getPackedLightCompat(pPartialTicks);
         pBuffer.addVertex(avector3f[0].x(), avector3f[0].y(), avector3f[0].z()).setUv(u1, v1).setColor(this.rCol, this.gCol, this.bCol, this.alpha).setLight(j);
         pBuffer.addVertex(avector3f[1].x(), avector3f[1].y(), avector3f[1].z()).setUv(u1, v0).setColor(this.rCol, this.gCol, this.bCol, this.alpha).setLight(j);
         pBuffer.addVertex(avector3f[2].x(), avector3f[2].y(), avector3f[2].z()).setUv(u0, v0).setColor(this.rCol, this.gCol, this.bCol, this.alpha).setLight(j);
@@ -219,5 +234,55 @@ public abstract class ParticleRotating extends SingleQuadParticle {
 
     public void setBrightness(float brightness) {
         this.brightness = brightness;
+    }
+
+    protected int getPackedLightCompat(float partialTick) {
+        try {
+            Method method = getLightCoordsCompatMethod();
+            if (method != null) {
+                return (int) method.invoke(this, partialTick);
+            }
+            method = getLightColorCompatMethod();
+            if (method != null) {
+                return (int) method.invoke(this, partialTick);
+            }
+        } catch (Exception ignored) {
+        }
+        return 0;
+    }
+
+    private static Method getLightCoordsCompatMethod() {
+        if (!watutCheckedLightMethods) {
+            discoverLightMethods();
+        }
+        return watutGetLightCoordsMethod;
+    }
+
+    private static Method getLightColorCompatMethod() {
+        if (!watutCheckedLightMethods) {
+            discoverLightMethods();
+        }
+        return watutGetLightColorMethod;
+    }
+
+    private static void discoverLightMethods() {
+        watutCheckedLightMethods = true;
+        Class<?> cls = SingleQuadParticle.class;
+        while (cls != null) {
+            for (Method method : cls.getDeclaredMethods()) {
+                if (method.getParameterCount() == 1
+                        && method.getParameterTypes()[0] == float.class
+                        && method.getReturnType() == int.class) {
+                    if (method.getName().equals("getLightCoords")) {
+                        method.setAccessible(true);
+                        watutGetLightCoordsMethod = method;
+                    } else if (method.getName().equals("getLightColor")) {
+                        method.setAccessible(true);
+                        watutGetLightColorMethod = method;
+                    }
+                }
+            }
+            cls = cls.getSuperclass();
+        }
     }
 }

@@ -1,5 +1,5 @@
 plugins {
-    id 'fabric-loom' version '1.13.3'
+    id 'net.fabricmc.fabric-loom' version '1.16.0-alpha.10'
     id 'maven-publish'
     id "com.hypherionmc.modutils.modpublisher" version "2.1.6"
 }
@@ -46,27 +46,39 @@ repositories {
 dependencies {
     // To change the versions see the gradle.properties file
     minecraft "com.mojang:minecraft:${project.minecraft_version}"
-    mappings loom.layered() {
-        officialMojangMappings()
-        //parchment("org.parchmentmc.data:parchment-${project.parchment_mc_version}:${project.parchment_version}@zip")
-    }
+    // 26.1+ Fabric snapshots ship unobfuscated jars. No mappings dependency needed.
     /*parchment("org.parchmentmc.data:parchment-${minecraft_version}:${parchment_version}@zip")
     mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"
     officialMojangMappings { nameSyntheticMembers = false }*/
-    modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+    implementation "net.fabricmc:fabric-loader:${project.loader_version}"
 
-    modImplementation "com.corosus.coroutil:coroutil-fabric:${project.minecraft_version}-${project.coroutil_version}"
+    // Loom 1.16 alpha on 26.x snapshots may not expose modImplementation in this setup.
+    // CoroUtil is already built/published locally for the same unobfuscated target, so implementation is sufficient.
+    if (project.minecraft_version.startsWith("26.")) {
+        implementation "com.corosus.coroutil:coroutil-fabric:${project.minecraft_version}-${project.coroutil_version}"
+    } else {
+        modImplementation "com.corosus.coroutil:coroutil-fabric:${project.minecraft_version}-${project.coroutil_version}"
+    }
 
     // Fabric API. This is technically optional, but you probably want it anyway.
-    modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
+    include(implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}")
 
     //include(modImplementation("ForgeConfigAPIPort:ForgeConfigAPIPort:v8.0.0-1.20.1-Fabric"))
     //using https://www.curseforge.com/minecraft/mc-mods/forge-config-api-port-fabric/files/4583000
     //include(modImplementation("curse.maven:forge-config-api-port-fabric-547434:7213620"))
-    include(modImplementation("maven.modrinth:forge-config-api-port:21.11.1-fabric,1.21.11"))
+    // No 26.1 snapshot build of ForgeConfigAPIPort is currently published.
     implementation 'com.electronwill.night-config:core:3.7.3'
     implementation 'com.electronwill.night-config:toml:3.7.3'
     //include(modImplementation("fuzs.forgeconfigapiport:forgeconfigapiport-fabric:v8.0.0-1.20.1-Fabric"))
+
+    // Work around a Loom alpha snapshot issue where the generated merged dependency can be source-only.
+    // We only need this for 26.x snapshots and keep it compileOnly so runtime/remap behavior stays with Loom.
+    if (project.minecraft_version.startsWith("26.")) {
+        def loomClientJar = new File(gradle.gradleUserHomeDir, "caches/fabric-loom/${project.minecraft_version}/minecraft-client.jar")
+        if (loomClientJar.exists()) {
+            compileOnly files(loomClientJar)
+        }
+    }
 }
 
 //If there's mixins
@@ -105,7 +117,7 @@ processResources {
 
 tasks.withType(JavaCompile).configureEach {
     // Minecraft 1.18 (1.18-pre2) upwards uses Java 17.
-    it.options.release = 21
+    it.options.release = 25
 }
 
 java {
@@ -114,8 +126,8 @@ java {
     // If you remove this line, sources will not be generated.
     //withSourcesJar()
 
-    sourceCompatibility = JavaVersion.VERSION_21
-    targetCompatibility = JavaVersion.VERSION_21
+    sourceCompatibility = JavaVersion.VERSION_25
+    targetCompatibility = JavaVersion.VERSION_25
 }
 
 jar {
@@ -217,7 +229,7 @@ publisher {
 
     // Add supported java versions. Currently only used by CurseForge
     // Supports anything that can be parsed using JavaVersion.toVersion()
-    setJavaVersions(JavaVersion.VERSION_21, 21)
+    setJavaVersions(JavaVersion.VERSION_25, 25)
 
     // Safety check to check if the artifact contains a valid mod metadata entry,
     // which could possibly mean that the jar is empty

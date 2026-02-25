@@ -2,11 +2,13 @@ package com.corosus.watut.client.screen;
 
 import com.corosus.watut.WatutMod;
 import com.corosus.watut.client.ParticleRenderTypeOld;
+import com.corosus.watut.client.RenderPipelineCompat;
+import com.corosus.watut.mixin.client.RenderPipelinesAccessor;
+import com.corosus.watut.mixin.client.RenderTypeAccessor;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
 import com.mojang.blaze3d.pipeline.BlendFunction;
 import com.mojang.blaze3d.pipeline.RenderPipeline;
-import com.mojang.blaze3d.platform.DepthTestFunction;
 import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.client.renderer.rendertype.OutputTarget;
 import net.minecraft.client.renderer.rendertype.RenderSetup;
@@ -20,14 +22,8 @@ import java.nio.ByteBuffer;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public class ScreenData {
-    private static final RenderPipeline TRANSLUCENT_PARTICLE_NO_CULL = RenderPipelines.register(
-            RenderPipeline.builder(RenderPipelines.PARTICLE_SNIPPET)
-                    .withLocation("pipeline/watut_translucent_particle_no_cull")
-                    .withBlend(BlendFunction.TRANSLUCENT)
-                    .withCull(false)
-                    .withDepthTestFunction(DepthTestFunction.LEQUAL_DEPTH_TEST)
-                    .withDepthWrite(false)
-                    .build());
+    private static final RenderPipeline TRANSLUCENT_PARTICLE_NO_CULL = RenderPipelinesAccessor.watut$invokeRegister(
+            createDynamicGuiPipeline());
 
     private volatile ByteBuffer texturePixelData = null;
     private volatile ByteBuffer decompressionBuffer = null;
@@ -63,6 +59,15 @@ public class ScreenData {
 
     public static boolean testing = false;
 
+    private static RenderPipeline createDynamicGuiPipeline() {
+        RenderPipeline.Builder builder = RenderPipeline.builder(RenderPipelinesAccessor.watut$getParticleSnippet())
+                .withLocation("pipeline/watut_translucent_particle_no_cull")
+                .withCull(false);
+        RenderPipelineCompat.withTranslucentColorTarget(builder);
+        RenderPipelineCompat.withLequalNoDepthWrite(builder);
+        return builder.build();
+    }
+
     public void initClient() {
         this.particleRenderType = new ParticleRenderTypeOld() {
             @Override
@@ -89,7 +94,7 @@ public class ScreenData {
                 textureLocation = Identifier.fromNamespaceAndPath(WatutMod.MODID, "dynamic/screen_" + System.identityHashCode(this));
             }
             Minecraft.getInstance().getTextureManager().register(textureLocation, image);
-            cachedRenderType = RenderType.create(
+            cachedRenderType = RenderTypeAccessor.watut$invokeCreate(
                     "watut_translucent_particle_no_cull_dynamic_" + System.identityHashCode(this),
                     RenderSetup.builder(TRANSLUCENT_PARTICLE_NO_CULL)
                             .bufferSize(1536)

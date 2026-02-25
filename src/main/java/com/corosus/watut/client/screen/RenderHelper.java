@@ -292,7 +292,7 @@ public class RenderHelper {
                 boolean screenChangedSinceCapture = mc.screen != meta.sourceScreen
                         || playerStatusLocal.getPlayerGuiState() != meta.sourceGuiState;
                 if (screenChangedSinceCapture) {
-                // Drop stale compressed frames if the local screen changed before compression finished.
+                    // Drop stale compressed frames if the local screen changed before compression finished.
                     playerStatusLocal.getScreenData().setNeedsNewRenderToPixelData(true);
                 } else {
                     ScreenData screenDataLocal = playerStatusLocal.getScreenData();
@@ -442,8 +442,9 @@ public class RenderHelper {
                 if (useThread) {
                     Minecraft mc = Minecraft.getInstance();
                     PlayerStatus playerStatusLocal = WatutMod.getPlayerStatusManagerClient().getStatusLocal();
+                    int captureSequence = allocateCaptureSequence();
                     enqueueCompressedFrameMeta(new CompressedFrameMeta(
-                            allocateCaptureSequence(),
+                            captureSequence,
                             mc.screen,
                             playerStatusLocal.getPlayerGuiState()
                     ));

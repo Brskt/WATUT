@@ -12,7 +12,7 @@ import net.minecraft.client.renderer.OutlineBufferSource;
 import net.minecraft.client.renderer.RenderBuffers;
 import net.minecraft.client.renderer.SubmitNodeCollection;
 import net.minecraft.client.renderer.SubmitNodeStorage;
-import net.minecraft.client.renderer.entity.ItemRenderer;
+import net.minecraft.client.renderer.feature.ItemFeatureRenderer;
 import net.minecraft.client.renderer.feature.CustomFeatureRenderer;
 import net.minecraft.client.renderer.feature.ModelFeatureRenderer;
 import net.minecraft.client.renderer.feature.ModelPartFeatureRenderer;
@@ -26,13 +26,33 @@ import net.minecraft.world.phys.Vec3;
 import org.joml.Quaternionf;
 
 import java.util.HashSet;
+import java.lang.reflect.Method;
 
 public class ParticleItem extends ParticleRotating {
 
     public static HashSet<String> itemBlacklist = new HashSet<>();
+    private static final ItemFeatureRenderer ITEM_FEATURE_RENDERER = new ItemFeatureRenderer();
     private static final ModelFeatureRenderer MODEL_FEATURE_RENDERER = new ModelFeatureRenderer();
     private static final ModelPartFeatureRenderer MODEL_PART_FEATURE_RENDERER = new ModelPartFeatureRenderer();
     private static final CustomFeatureRenderer CUSTOM_FEATURE_RENDERER = new CustomFeatureRenderer();
+    private static boolean featureRendererMethodsInitialized;
+    private static boolean featureRendererHasSplitPassMethods;
+    private static Method itemFeatureRenderMethod;
+    private static Method itemFeatureRenderSolidMethod;
+    private static Method itemFeatureRenderTranslucentMethod;
+    private static Method modelFeatureRenderMethod;
+    private static Method modelFeatureRenderSolidMethod;
+    private static Method modelFeatureRenderTranslucentMethod;
+    private static Method modelPartFeatureRenderMethod;
+    private static Method modelPartFeatureRenderSolidMethod;
+    private static Method modelPartFeatureRenderTranslucentMethod;
+    private static Method customFeatureRenderMethod;
+    private static Method customFeatureRenderSolidMethod;
+    private static Method customFeatureRenderTranslucentMethod;
+    private static boolean particleMaterialMethodsInitialized;
+    private static Method pickParticleMaterialMethod;
+    private static Method pickParticleIconMethod;
+    private static Method particleMaterialSpriteMethod;
 
     public ItemStackRenderState scratchItemStackRenderState;
     public ItemStack itemStack;
@@ -78,7 +98,11 @@ public class ParticleItem extends ParticleRotating {
 
     @Override
     protected Layer getLayer() {
-        return Layer.TERRAIN;
+        Layer layer = getLayerByStaticField("TRANSLUCENT_TERRAIN");
+        if (layer != null) return layer;
+        layer = getLayerByStaticField("TERRAIN");
+        if (layer != null) return layer;
+        return Layer.TRANSLUCENT;
     }
 
     public void setSize(float pWidth, float pHeight) {
@@ -120,7 +144,7 @@ public class ParticleItem extends ParticleRotating {
         y = y - vec3.y();
         z = z - vec3.z();
 
-        int light = this.getLightColor(pPartialTicks);
+        int light = this.getPackedLightCompat(pPartialTicks);
 
         Quaternionf quaternion = new Quaternionf(0, 0, 0, 1);
         quaternion.mul(Axis.YP.rotationDegrees(this.rotationYaw));
@@ -145,7 +169,7 @@ public class ParticleItem extends ParticleRotating {
         } catch (Exception exception) {
             CULog.err("ERROR, exception trying to render item: " + this.itemStack.getItem().toString() + " - adding to ParticleItem render blacklist for this minecraft session");
             itemBlacklist.add(this.itemStack.getItem().toString());
-            TextureAtlasSprite icon = this.scratchItemStackRenderState.pickParticleIcon(this.random);
+            TextureAtlasSprite icon = pickParticleSpriteCompat();
             if (icon != null) {
                 this.setSprite(icon);
             }
@@ -157,41 +181,105 @@ public class ParticleItem extends ParticleRotating {
     }
 
     private void renderCollection(SubmitNodeCollection collection) {
-        for (SubmitNodeStorage.ItemSubmit itemSubmit : collection.getItemSubmits()) {
-            PoseStack itemPose = new PoseStack();
-            itemPose.last().set(itemSubmit.pose());
-            ItemRenderer.renderItem(
-                    itemSubmit.displayContext(),
-                    itemPose,
-                    renderBuffers.bufferSource(),
-                    itemSubmit.lightCoords(),
-                    itemSubmit.overlayCoords(),
-                    itemSubmit.tintLayers(),
-                    itemSubmit.quads(),
-                    itemSubmit.renderType(),
-                    itemSubmit.foilType()
-            );
+        initFeatureRendererMethods();
+        try {
+            if (featureRendererHasSplitPassMethods) {
+                itemFeatureRenderSolidMethod.invoke(ITEM_FEATURE_RENDERER, collection, renderBuffers.bufferSource(), renderBuffers.outlineBufferSource());
+                modelFeatureRenderSolidMethod.invoke(MODEL_FEATURE_RENDERER, collection, renderBuffers.bufferSource(), renderBuffers.outlineBufferSource(), renderBuffers.crumblingBufferSource());
+                modelPartFeatureRenderSolidMethod.invoke(MODEL_PART_FEATURE_RENDERER, collection, renderBuffers.bufferSource(), renderBuffers.outlineBufferSource(), renderBuffers.crumblingBufferSource());
+                customFeatureRenderSolidMethod.invoke(CUSTOM_FEATURE_RENDERER, collection, renderBuffers.bufferSource());
 
-            if (itemSubmit.outlineColor() != 0) {
-                OutlineBufferSource outlineBuffers = renderBuffers.outlineBufferSource();
-                outlineBuffers.setColor(itemSubmit.outlineColor());
-                ItemRenderer.renderItem(
-                        itemSubmit.displayContext(),
-                        itemPose,
-                        outlineBuffers,
-                        itemSubmit.lightCoords(),
-                        itemSubmit.overlayCoords(),
-                        itemSubmit.tintLayers(),
-                        itemSubmit.quads(),
-                        itemSubmit.renderType(),
-                        ItemStackRenderState.FoilType.NONE
-                );
+                itemFeatureRenderTranslucentMethod.invoke(ITEM_FEATURE_RENDERER, collection, renderBuffers.bufferSource(), renderBuffers.outlineBufferSource());
+                modelFeatureRenderTranslucentMethod.invoke(MODEL_FEATURE_RENDERER, collection, renderBuffers.bufferSource(), renderBuffers.outlineBufferSource(), renderBuffers.crumblingBufferSource());
+                modelPartFeatureRenderTranslucentMethod.invoke(MODEL_PART_FEATURE_RENDERER, collection, renderBuffers.bufferSource(), renderBuffers.outlineBufferSource(), renderBuffers.crumblingBufferSource());
+                customFeatureRenderTranslucentMethod.invoke(CUSTOM_FEATURE_RENDERER, collection, renderBuffers.bufferSource());
+            } else {
+                itemFeatureRenderMethod.invoke(ITEM_FEATURE_RENDERER, collection, renderBuffers.bufferSource(), renderBuffers.outlineBufferSource());
+                modelFeatureRenderMethod.invoke(MODEL_FEATURE_RENDERER, collection, renderBuffers.bufferSource(), renderBuffers.outlineBufferSource(), renderBuffers.crumblingBufferSource());
+                modelPartFeatureRenderMethod.invoke(MODEL_PART_FEATURE_RENDERER, collection, renderBuffers.bufferSource(), renderBuffers.outlineBufferSource(), renderBuffers.crumblingBufferSource());
+                customFeatureRenderMethod.invoke(CUSTOM_FEATURE_RENDERER, collection, renderBuffers.bufferSource());
             }
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to replay ItemStackRenderState submit collection", e);
+        }
+    }
+
+    private TextureAtlasSprite pickParticleSpriteCompat() {
+        initParticleMaterialMethods();
+        try {
+            if (pickParticleMaterialMethod != null) {
+                Object material = pickParticleMaterialMethod.invoke(this.scratchItemStackRenderState, this.random);
+                if (material != null) {
+                    if (particleMaterialSpriteMethod == null) {
+                        particleMaterialSpriteMethod = material.getClass().getMethod("sprite");
+                    }
+                    Object sprite = particleMaterialSpriteMethod.invoke(material);
+                    if (sprite instanceof TextureAtlasSprite textureAtlasSprite) {
+                        return textureAtlasSprite;
+                    }
+                }
+            }
+            if (pickParticleIconMethod != null) {
+                Object sprite = pickParticleIconMethod.invoke(this.scratchItemStackRenderState, this.random);
+                if (sprite instanceof TextureAtlasSprite textureAtlasSprite) {
+                    return textureAtlasSprite;
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return null;
+    }
+
+    private static void initParticleMaterialMethods() {
+        if (particleMaterialMethodsInitialized) return;
+        particleMaterialMethodsInitialized = true;
+        try {
+            pickParticleMaterialMethod = ItemStackRenderState.class.getMethod("pickParticleMaterial", net.minecraft.util.RandomSource.class);
+        } catch (NoSuchMethodException ignored) {
+        }
+        try {
+            pickParticleIconMethod = ItemStackRenderState.class.getMethod("pickParticleIcon", net.minecraft.util.RandomSource.class);
+        } catch (NoSuchMethodException ignored) {
+        }
+    }
+
+    private static void initFeatureRendererMethods() {
+        if (featureRendererMethodsInitialized) return;
+        featureRendererMethodsInitialized = true;
+        try {
+            itemFeatureRenderSolidMethod = ItemFeatureRenderer.class.getMethod("renderSolid", SubmitNodeCollection.class, net.minecraft.client.renderer.MultiBufferSource.BufferSource.class, OutlineBufferSource.class);
+            itemFeatureRenderTranslucentMethod = ItemFeatureRenderer.class.getMethod("renderTranslucent", SubmitNodeCollection.class, net.minecraft.client.renderer.MultiBufferSource.BufferSource.class, OutlineBufferSource.class);
+            modelFeatureRenderSolidMethod = ModelFeatureRenderer.class.getMethod("renderSolid", SubmitNodeCollection.class, net.minecraft.client.renderer.MultiBufferSource.BufferSource.class, OutlineBufferSource.class, net.minecraft.client.renderer.MultiBufferSource.BufferSource.class);
+            modelFeatureRenderTranslucentMethod = ModelFeatureRenderer.class.getMethod("renderTranslucent", SubmitNodeCollection.class, net.minecraft.client.renderer.MultiBufferSource.BufferSource.class, OutlineBufferSource.class, net.minecraft.client.renderer.MultiBufferSource.BufferSource.class);
+            modelPartFeatureRenderSolidMethod = ModelPartFeatureRenderer.class.getMethod("renderSolid", SubmitNodeCollection.class, net.minecraft.client.renderer.MultiBufferSource.BufferSource.class, OutlineBufferSource.class, net.minecraft.client.renderer.MultiBufferSource.BufferSource.class);
+            modelPartFeatureRenderTranslucentMethod = ModelPartFeatureRenderer.class.getMethod("renderTranslucent", SubmitNodeCollection.class, net.minecraft.client.renderer.MultiBufferSource.BufferSource.class, OutlineBufferSource.class, net.minecraft.client.renderer.MultiBufferSource.BufferSource.class);
+            customFeatureRenderSolidMethod = CustomFeatureRenderer.class.getMethod("renderSolid", SubmitNodeCollection.class, net.minecraft.client.renderer.MultiBufferSource.BufferSource.class);
+            customFeatureRenderTranslucentMethod = CustomFeatureRenderer.class.getMethod("renderTranslucent", SubmitNodeCollection.class, net.minecraft.client.renderer.MultiBufferSource.BufferSource.class);
+            featureRendererHasSplitPassMethods = true;
+            return;
+        } catch (NoSuchMethodException ignored) {
+            featureRendererHasSplitPassMethods = false;
         }
 
-        MODEL_FEATURE_RENDERER.render(collection, renderBuffers.bufferSource(), renderBuffers.outlineBufferSource(), renderBuffers.crumblingBufferSource());
-        MODEL_PART_FEATURE_RENDERER.render(collection, renderBuffers.bufferSource(), renderBuffers.outlineBufferSource(), renderBuffers.crumblingBufferSource());
-        CUSTOM_FEATURE_RENDERER.render(collection, renderBuffers.bufferSource());
+        try {
+            itemFeatureRenderMethod = ItemFeatureRenderer.class.getMethod("render", SubmitNodeCollection.class, net.minecraft.client.renderer.MultiBufferSource.BufferSource.class, OutlineBufferSource.class);
+            modelFeatureRenderMethod = ModelFeatureRenderer.class.getMethod("render", SubmitNodeCollection.class, net.minecraft.client.renderer.MultiBufferSource.BufferSource.class, OutlineBufferSource.class, net.minecraft.client.renderer.MultiBufferSource.BufferSource.class);
+            modelPartFeatureRenderMethod = ModelPartFeatureRenderer.class.getMethod("render", SubmitNodeCollection.class, net.minecraft.client.renderer.MultiBufferSource.BufferSource.class, OutlineBufferSource.class, net.minecraft.client.renderer.MultiBufferSource.BufferSource.class);
+            customFeatureRenderMethod = CustomFeatureRenderer.class.getMethod("render", SubmitNodeCollection.class, net.minecraft.client.renderer.MultiBufferSource.BufferSource.class);
+        } catch (NoSuchMethodException e) {
+            throw new RuntimeException("Unsupported item feature renderer API", e);
+        }
+    }
+
+    private static Layer getLayerByStaticField(String fieldName) {
+        try {
+            Object value = Layer.class.getField(fieldName).get(null);
+            if (value instanceof Layer layer) {
+                return layer;
+            }
+        } catch (Exception ignored) {
+        }
+        return null;
     }
 
 }

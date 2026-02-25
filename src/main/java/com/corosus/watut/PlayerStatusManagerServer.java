@@ -14,7 +14,6 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.inventory.AbstractContainerMenu;
-import net.minecraft.world.inventory.ClickType;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
@@ -195,7 +194,7 @@ public class PlayerStatusManagerServer extends PlayerStatusManager {
 
     }
 
-    public void doClickPre(AbstractContainerMenu abstractContainerMenu, int pSlotId, int pButton, ClickType pClickType, Player player) {
+    public void doClickPre(AbstractContainerMenu abstractContainerMenu, int pSlotId, int pButton, Object pClickType, Player player) {
         //System.out.println("? " + pClickType);
 
         if (!ConfigServerControlledSyncedToClient.showItemsBeingTransferredBetweenPlayerAndContainer) return;
@@ -220,7 +219,7 @@ public class PlayerStatusManagerServer extends PlayerStatusManager {
         playerStatus.setLastBlockOpened(pos);
     }
 
-    public void doClickPost(AbstractContainerMenu abstractContainerMenu, int pSlotId, int pButton, ClickType pClickType, Player player) {
+    public void doClickPost(AbstractContainerMenu abstractContainerMenu, int pSlotId, int pButton, Object pClickType, Player player) {
         if (!ConfigServerControlledSyncedToClient.showItemsBeingTransferredBetweenPlayerAndContainer) return;
         if (FakePlayerHelper.isFakePlayer(player)) return;
         PlayerStatus playerStatus = getStatus(player);
@@ -270,7 +269,7 @@ public class PlayerStatusManagerServer extends PlayerStatusManager {
          * -- same for the inverse as youd expect
          */
 
-        if (pClickType == ClickType.PICKUP) {
+        if (isContainerClickType(pClickType, "PICKUP")) {
             //CULog.dbg("? " + abstractContainerMenu.getCarried());
 
 
@@ -342,7 +341,7 @@ public class PlayerStatusManagerServer extends PlayerStatusManager {
                     }
                 }
             }*/
-        } else if (pClickType == ClickType.QUICK_MOVE) {
+        } else if (isContainerClickType(pClickType, "QUICK_MOVE")) {
             //compare player removed items against container added items
             for (ItemStack itemStackRemoved : playerRemovedItems) {
                 ItemStack itemStackAdded = getMatchingItem(itemStackRemoved, containerAddedItems);
@@ -374,6 +373,13 @@ public class PlayerStatusManagerServer extends PlayerStatusManager {
      */
     public ItemStack getSimpleItemStack(ItemStack itemStack) {
         return new ItemStack(itemStack.getItem(), itemStack.getCount());
+    }
+
+    private static boolean isContainerClickType(Object clickType, String expectedName) {
+        if (!(clickType instanceof Enum<?> clickEnum)) {
+            return false;
+        }
+        return expectedName.equals(clickEnum.name());
     }
 
     public Pair<List<ItemStack>, List<ItemStack>> processInventorySnapshots(List<ItemStack> pre, List<ItemStack> post) {

@@ -27,3 +27,8 @@ pluginManagement {
 plugins {
     id 'org.gradle.toolchains.foojay-resolver-convention' version '0.9.0'
 }
+
+def selectedBuildScript = System.getProperty("coroutil.buildScript")
+if (selectedBuildScript != null && !selectedBuildScript.isBlank()) {
+    rootProject.buildFileName = selectedBuildScript
+}

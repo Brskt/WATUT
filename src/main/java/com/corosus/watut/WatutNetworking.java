@@ -21,6 +21,7 @@ public abstract class WatutNetworking {
     public static String NBTDataPlayerScreenCompressedPixelData = "screenCompressedPixelData";
     public static String NBTDataPlayerScreenCompressedPixelDataPacketCount = "screenCompressedPixelDataPacketCount";
     public static String NBTDataPlayerScreenCompressedPixelDataPacketIndex = "screenCompressedPixelDataPacketIndex";
+    public static String NBTDataPlayerScreenCaptureSequence = "screenCaptureSequence";
     //public static String NBTDataPlayerScreenCompressedPixelDataMD5 = "screenCompressedPixelDataMD5";
     public static String NBTDataPlayerScreenCompressedPixelDataSize = "screenCompressedPixelDataSize";
     public static String NBTDataPlayerScreenWidth = "screenWidth";
@@ -76,4 +77,3 @@ public abstract class WatutNetworking {
     public abstract void serverSendToClientNear(CompoundTag data, Vec3 pos, double dist, Level level);
 
 }
-

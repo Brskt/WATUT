@@ -11,11 +11,13 @@ import com.mojang.blaze3d.systems.CommandEncoder;
 import com.mojang.blaze3d.systems.RenderPass;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.buffers.Std140Builder;
+import com.mojang.blaze3d.textures.FilterMode;
+import com.mojang.blaze3d.textures.GpuSampler;
 import com.mojang.blaze3d.textures.GpuTextureView;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.MappableRingBuffer;
 import net.minecraft.client.renderer.RenderPipelines;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 
 import java.util.OptionalInt;
 
@@ -124,7 +126,6 @@ public class ScreenParticleRenderer {
         MinecraftAccessor mcAccessor = (MinecraftAccessor) Minecraft.getInstance();
         savedMainRenderTarget = mcAccessor.watut$getMainRenderTarget();
         mcAccessor.watut$setMainRenderTarget(mainRenderTarget);
-
         CommandEncoder encoder = RenderSystem.getDevice().createCommandEncoder();
         encoder.clearColorTexture(mainRenderTarget.getColorTexture(), 0);
         // Clear depth to 1.0 so GUI fragments pass the depth test (LEQUAL)
@@ -240,6 +241,10 @@ public class ScreenParticleRenderer {
         }
     }
 
+    private static GpuSampler getGuiBlurSampler() {
+        return RenderSystem.getSamplerCache().getClampToEdge(FilterMode.LINEAR);
+    }
+
     public void innerBlitCustomShader(int p_281399_, int p_283222_, int p_283615_, int p_283430_, int p_281729_, float minU, float maxU, float minV, float maxV) {
         GpuTextureView inputView = resolveCaptureInputView();
         GpuTextureView outputView = mainRenderTargetScaledDown.getColorTextureView();
@@ -255,7 +260,9 @@ public class ScreenParticleRenderer {
                 RenderSystem.bindDefaultUniforms(renderPass);
                 renderPass.setUniform("BlurParams", blurParamsBuffer);
                 renderPass.setUniform("SamplerInfo", samplerInfoBuffer);
-                renderPass.bindSampler("InSampler", inputView);
+                // 1.21.11+: GlRenderPass.bindTexture(..., null) removes the binding (unbinds the texture).
+                // Always provide an explicit sampler here or the blur/blit pass will sample stale data.
+                renderPass.bindTexture("InSampler", inputView, getGuiBlurSampler());
                 renderPass.draw(0, 3);
             }
         } finally {
@@ -279,7 +286,7 @@ public class ScreenParticleRenderer {
                 RenderSystem.bindDefaultUniforms(renderPass);
                 renderPass.setUniform("BlurParams", blurParamsBuffer);
                 renderPass.setUniform("SamplerInfo", samplerInfoBuffer);
-                renderPass.bindSampler("InSampler", inputView);
+                renderPass.bindTexture("InSampler", inputView, getGuiBlurSampler());
                 renderPass.draw(0, 3);
             }
         } finally {
@@ -304,7 +311,7 @@ public class ScreenParticleRenderer {
                 RenderSystem.bindDefaultUniforms(renderPass);
                 renderPass.setUniform("BlurParams", blurParamsBuffer);
                 renderPass.setUniform("SamplerInfo", samplerInfoBuffer);
-                renderPass.bindSampler("InSampler", inputView);
+                renderPass.bindTexture("InSampler", inputView, getGuiBlurSampler());
                 renderPass.draw(0, 3);
             }
         } finally {
@@ -313,7 +320,7 @@ public class ScreenParticleRenderer {
     }
 
     //copy of GuiGraphics.innerBlit with PoseStack added - now uses blit pipeline
-    public void innerBlit(ResourceLocation atlasLocation, int x1, int x2, int y1, int y2, int blitOffset, float minU, float maxU, float minV, float maxV) {
+    public void innerBlit(Identifier atlasLocation, int x1, int x2, int y1, int y2, int blitOffset, float minU, float maxU, float minV, float maxV) {
         //TODO: cursor rendering needs rework for 1.21.5 - using blit pipeline won't support custom UVs
         // For now this is a no-op, cursor won't render in capture
     }

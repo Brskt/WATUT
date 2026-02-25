@@ -2,16 +2,18 @@ package com.corosus.watut.client.screen;
 
 import com.corosus.watut.WatutMod;
 import com.corosus.watut.client.ParticleRenderTypeOld;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.screens.Screen;
 import com.mojang.blaze3d.pipeline.BlendFunction;
 import com.mojang.blaze3d.pipeline.RenderPipeline;
 import com.mojang.blaze3d.platform.DepthTestFunction;
-import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.renderer.RenderPipelines;
-import net.minecraft.client.renderer.RenderStateShard;
-import net.minecraft.client.renderer.RenderType;
+import net.minecraft.client.renderer.rendertype.OutputTarget;
+import net.minecraft.client.renderer.rendertype.RenderSetup;
+import net.minecraft.client.renderer.rendertype.RenderType;
+import net.minecraft.client.renderer.rendertype.RenderTypes;
 import net.minecraft.client.renderer.texture.DynamicTexture;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import org.lwjgl.system.MemoryUtil;
 
 import java.nio.ByteBuffer;
@@ -36,8 +38,11 @@ public class ScreenData {
 
     private long gameTicksSinceFirstPacket = 0;
     private int lastIndexReceived = 0;
+    private int currentReceiveCaptureSequence = -1;
+    private int lastAppliedCaptureSequence = -1;
     private long gameTicksSinceLastScreenSend = 0;
     private long gameTicksSinceLastScreenReceiveAndRender = 0;
+    private int texturePixelDataCaptureSequence = 0;
 
     private ParticleRenderTypeOld particleRenderType;
 
@@ -53,7 +58,7 @@ public class ScreenData {
     //since gui states are kinda old system and require specifically adding support for a screen, we use this instead to track true differences now
     private Screen lastScreen;
 
-    private ResourceLocation textureLocation = null;
+    private Identifier textureLocation = null;
     private RenderType cachedRenderType = null;
 
     public static boolean testing = false;
@@ -66,7 +71,7 @@ public class ScreenData {
                     return cachedRenderType;
                 }
                 // Fallback when texture not yet registered
-                return RenderType.entityTranslucent(net.minecraft.client.renderer.texture.TextureAtlas.LOCATION_PARTICLES);
+                return RenderTypes.entityTranslucent(net.minecraft.client.renderer.texture.TextureAtlas.LOCATION_PARTICLES);
             }
 
             public String toString() {
@@ -81,18 +86,17 @@ public class ScreenData {
     public void registerTexture() {
         if (image != null) {
             if (textureLocation == null) {
-                textureLocation = ResourceLocation.fromNamespaceAndPath(WatutMod.MODID, "dynamic/screen_" + System.identityHashCode(this));
+                textureLocation = Identifier.fromNamespaceAndPath(WatutMod.MODID, "dynamic/screen_" + System.identityHashCode(this));
             }
             Minecraft.getInstance().getTextureManager().register(textureLocation, image);
             cachedRenderType = RenderType.create(
                     "watut_translucent_particle_no_cull_dynamic_" + System.identityHashCode(this),
-                    1536,
-                    TRANSLUCENT_PARTICLE_NO_CULL,
-                    RenderType.CompositeState.builder()
-                            .setTextureState(new RenderStateShard.TextureStateShard(textureLocation, false))
-                            .setOutputState(RenderStateShard.MAIN_TARGET)
-                            .setLightmapState(RenderStateShard.LIGHTMAP)
-                            .createCompositeState(false)
+                    RenderSetup.builder(TRANSLUCENT_PARTICLE_NO_CULL)
+                            .bufferSize(1536)
+                            .withTexture("Sampler0", textureLocation)
+                            .setOutputTarget(OutputTarget.MAIN_TARGET)
+                            .useLightmap()
+                            .createRenderSetup()
             );
         }
     }
@@ -177,6 +181,30 @@ public class ScreenData {
 
     public void setGameTicksSinceLastScreenReceiveAndRender(long gameTicksSinceLastScreenReceiveAndRender) {
         this.gameTicksSinceLastScreenReceiveAndRender = gameTicksSinceLastScreenReceiveAndRender;
+    }
+
+    public int getCurrentReceiveCaptureSequence() {
+        return currentReceiveCaptureSequence;
+    }
+
+    public void setCurrentReceiveCaptureSequence(int currentReceiveCaptureSequence) {
+        this.currentReceiveCaptureSequence = currentReceiveCaptureSequence;
+    }
+
+    public int getLastAppliedCaptureSequence() {
+        return lastAppliedCaptureSequence;
+    }
+
+    public void setLastAppliedCaptureSequence(int lastAppliedCaptureSequence) {
+        this.lastAppliedCaptureSequence = lastAppliedCaptureSequence;
+    }
+
+    public int getTexturePixelDataCaptureSequence() {
+        return texturePixelDataCaptureSequence;
+    }
+
+    public void setTexturePixelDataCaptureSequence(int texturePixelDataCaptureSequence) {
+        this.texturePixelDataCaptureSequence = texturePixelDataCaptureSequence;
     }
 
     public AtomicBoolean getIsBufferReady() {

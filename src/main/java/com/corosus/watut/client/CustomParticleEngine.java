@@ -9,12 +9,12 @@ import it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap;
 import net.minecraft.CrashReport;
 import net.minecraft.CrashReportCategory;
 import net.minecraft.ReportedException;
-import net.minecraft.Util;
+import net.minecraft.util.Util;
 import net.minecraft.client.Camera;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.particle.*;
 import net.minecraft.client.renderer.MultiBufferSource;
-import net.minecraft.client.renderer.RenderType;
+import net.minecraft.client.renderer.rendertype.RenderType;
 import net.minecraft.client.renderer.texture.SpriteLoader;
 import net.minecraft.client.renderer.texture.TextureAtlas;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
@@ -22,7 +22,7 @@ import net.minecraft.client.renderer.texture.TextureManager;
 import net.minecraft.core.particles.ParticleLimit;
 import net.minecraft.core.particles.ParticleOptions;
 import net.minecraft.resources.FileToIdConverter;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.packs.resources.PreparableReloadListener;
 import net.minecraft.server.packs.resources.Resource;
 import net.minecraft.server.packs.resources.ResourceManager;
@@ -51,7 +51,7 @@ import java.util.stream.Collectors;
 public class CustomParticleEngine implements PreparableReloadListener {
    private static final Logger LOGGER = LogUtils.getLogger();
    private static final FileToIdConverter PARTICLE_LISTER = FileToIdConverter.json("particles");
-   private static final ResourceLocation PARTICLES_ATLAS_INFO = ResourceLocation.parse("particles");
+   private static final Identifier PARTICLES_ATLAS_INFO = Identifier.parse("particles");
    private static final int MAX_PARTICLES_PER_LAYER = 16384;
    private static final List<ParticleRenderTypeOld> RENDER_ORDER = ImmutableList.of();
    protected ClientLevel level;
@@ -59,9 +59,9 @@ public class CustomParticleEngine implements PreparableReloadListener {
    private final Queue<TrackingEmitter> trackingEmitters = Queues.newArrayDeque();
    private final TextureManager textureManager;
    private final RandomSource random = RandomSource.create();
-   private final Map<ResourceLocation, ParticleProvider<?>> providers = new java.util.HashMap<>();
+   private final Map<Identifier, ParticleProvider<?>> providers = new java.util.HashMap<>();
    private final Queue<ParticleRotating> particlesToAdd = Queues.newArrayDeque();
-   private final Map<ResourceLocation, CustomParticleEngine.MutableSpriteSet> spriteSets = Maps.newHashMap();
+   private final Map<Identifier, CustomParticleEngine.MutableSpriteSet> spriteSets = Maps.newHashMap();
    public final TextureAtlas textureAtlas;
    private final Object2IntOpenHashMap<ParticleLimit> trackedParticleCounts = new Object2IntOpenHashMap<>();
 
@@ -100,10 +100,10 @@ public class CustomParticleEngine implements PreparableReloadListener {
            Executor gameExecutor
    ) {
       ResourceManager manager = sharedState.resourceManager();
-      record ParticleDefinition(ResourceLocation id, Optional<List<ResourceLocation>> sprites) {
+      record ParticleDefinition(Identifier id, Optional<List<Identifier>> sprites) {
       }
 
-      CompletableFuture<List<ParticleDefinition>> completablefuture = CompletableFuture.<Map<ResourceLocation, Resource>>supplyAsync(
+      CompletableFuture<List<ParticleDefinition>> completablefuture = CompletableFuture.<Map<Identifier, Resource>>supplyAsync(
                       () -> PARTICLE_LISTER.listMatchingResources(manager), backgroundExecutor
               )
               .thenCompose(
@@ -111,7 +111,7 @@ public class CustomParticleEngine implements PreparableReloadListener {
                          List<CompletableFuture<ParticleDefinition>> list = new ArrayList<>(p_247914_.size());
                          p_247914_.forEach(
                                  (p_247903_, p_247904_) -> {
-                                    ResourceLocation resourcelocation = PARTICLE_LISTER.fileToId(p_247903_);
+                                    Identifier resourcelocation = PARTICLE_LISTER.fileToId(p_247903_);
                                     list.add(
                                             CompletableFuture.supplyAsync(
                                                     () -> new ParticleDefinition(resourcelocation, this.loadParticleDescription(resourcelocation, p_247904_)), backgroundExecutor
@@ -132,14 +132,14 @@ public class CustomParticleEngine implements PreparableReloadListener {
          SpriteLoader.Preparations spriteloader$preparations = completablefuture1.join();
          this.textureAtlas.upload(spriteloader$preparations);
          profilerfiller.popPush("bindSpriteSets");
-         Set<ResourceLocation> set = new HashSet<>();
+         Set<Identifier> set = new HashSet<>();
          TextureAtlasSprite textureatlassprite = spriteloader$preparations.missing();
          completablefuture.join().forEach(p_247911_ -> {
-            Optional<List<ResourceLocation>> optional = p_247911_.sprites();
+            Optional<List<Identifier>> optional = p_247911_.sprites();
             if (!optional.isEmpty()) {
                List<TextureAtlasSprite> list = new ArrayList<>();
 
-               for (ResourceLocation resourcelocation : optional.get()) {
+               for (Identifier resourcelocation : optional.get()) {
                   TextureAtlasSprite textureatlassprite1 = spriteloader$preparations.regions().get(resourcelocation);
                   if (textureatlassprite1 == null) {
                      set.add(resourcelocation);
@@ -157,7 +157,7 @@ public class CustomParticleEngine implements PreparableReloadListener {
             }
          });
          if (!set.isEmpty()) {
-            LOGGER.warn("Missing particle sprites: {}", set.stream().sorted().map(ResourceLocation::toString).collect(Collectors.joining(",")));
+            LOGGER.warn("Missing particle sprites: {}", set.stream().sorted().map(Identifier::toString).collect(Collectors.joining(",")));
          }
 
          profilerfiller.pop();
@@ -168,7 +168,7 @@ public class CustomParticleEngine implements PreparableReloadListener {
       this.textureAtlas.clearTextureData();
    }
 
-   private Optional<List<ResourceLocation>> loadParticleDescription(ResourceLocation p_250648_, Resource p_248793_) {
+   private Optional<List<Identifier>> loadParticleDescription(Identifier p_250648_, Resource p_248793_) {
       if (!this.spriteSets.containsKey(p_250648_)) {
          LOGGER.debug("Redundant texture list for particle: {}", (Object)p_250648_);
          return Optional.empty();

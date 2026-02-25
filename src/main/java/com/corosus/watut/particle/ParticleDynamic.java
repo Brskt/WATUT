@@ -58,7 +58,7 @@ public class ParticleDynamic extends ParticleRotating {
     }
 
     public void render(VertexConsumer pBuffer, Camera pRenderInfo, float pPartialTicks) {
-        Vec3 vec3 = pRenderInfo.getPosition();
+        Vec3 vec3 = pRenderInfo.position();
         float f = (float)(Mth.lerp(pPartialTicks, this.xo, this.x) - vec3.x());
         float f1 = (float)(Mth.lerp(pPartialTicks, this.yo, this.y) - vec3.y());
         float f2 = (float)(Mth.lerp(pPartialTicks, this.zo, this.z) - vec3.z());

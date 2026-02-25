@@ -100,7 +100,7 @@ public class ParticleItem extends ParticleRotating {
     public void render(VertexConsumer pBuffer, Camera pRenderInfo, float pPartialTicks) {
         if (itemBlacklist.contains(this.itemStack.getItem().toString())) return;
 
-        Vec3 vec3 = pRenderInfo.getPosition();
+        Vec3 vec3 = pRenderInfo.position();
         float f = (float)(Mth.lerp(pPartialTicks, this.xo, this.x));
         float f1 = (float)(Mth.lerp(pPartialTicks, this.yo, this.y));
         float f2 = (float)(Mth.lerp(pPartialTicks, this.zo, this.z));

@@ -4,6 +4,7 @@ import com.corosus.coroutil.util.MultiLoaderUtil;
 import com.corosus.watut.client.CustomParticleEngine;
 import com.corosus.watut.client.screen.RenderHelper;
 import com.corosus.coroutil.util.CULog;
+import com.corosus.watut.client.screen.ScreenData;
 import com.corosus.watut.client.screen.ScreenParticleRenderer;
 import com.corosus.watut.config.*;
 import com.corosus.watut.math.Lerpables;
@@ -16,7 +17,7 @@ import net.minecraft.client.gui.components.PlayerTabOverlay;
 import net.minecraft.client.gui.screens.*;
 import net.minecraft.client.gui.screens.inventory.*;
 import net.minecraft.client.model.EntityModel;
-import net.minecraft.client.model.PlayerModel;
+import net.minecraft.client.model.player.PlayerModel;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.multiplayer.PlayerInfo;
 import net.minecraft.client.player.AbstractClientPlayer;
@@ -1229,56 +1230,62 @@ public class PlayerStatusManagerClient extends PlayerStatusManager {
 
     public void sendScreenRenderData(PlayerStatus status) {
         CompoundTag data = new CompoundTag();
+        ScreenData screenData = status.getScreenData();
+        ByteBuffer texturePixelData = screenData.getTexturePixelData();
+        if (texturePixelData == null) {
+            return;
+        }
+        int captureSequence = screenData.getTexturePixelDataCaptureSequence();
 
         int packetSizeLimit = 31000;
-        int sizeByteCount = status.getScreenData().getTexturePixelData().remaining();
-        int sizeByteCountLimit = status.getScreenData().getTexturePixelData().limit();
-        if (status.getScreenData().getTexturePixelData() != null) {
-            byte[] inputBytes = new byte[sizeByteCount];
-            status.getScreenData().getTexturePixelData().get(inputBytes);
-            if (sizeByteCountLimit < packetSizeLimit) {
-                data.putInt(WatutNetworking.NBTDataPlayerScreenCompressedPixelDataSize, status.getScreenData().getTexturePixelData().capacity());
+        int sizeByteCount = texturePixelData.remaining();
+        int sizeByteCountLimit = texturePixelData.limit();
+        byte[] inputBytes = new byte[sizeByteCount];
+        texturePixelData.get(inputBytes);
+        if (sizeByteCountLimit < packetSizeLimit) {
+            data.putInt(WatutNetworking.NBTDataPlayerScreenCompressedPixelDataSize, texturePixelData.capacity());
+            data.putInt(WatutNetworking.NBTDataPlayerScreenWidth, ScreenParticleRenderer.getInstance().widthScaledDown);
+            data.putInt(WatutNetworking.NBTDataPlayerScreenHeight, ScreenParticleRenderer.getInstance().heightScaledDown);
+            data.putByteArray(WatutNetworking.NBTDataPlayerScreenCompressedPixelData, inputBytes);
+
+            data.putInt(WatutNetworking.NBTDataPlayerScreenCompressedPixelDataPacketCount, 1);
+            data.putInt(WatutNetworking.NBTDataPlayerScreenCompressedPixelDataPacketIndex, 1);
+            data.putInt(WatutNetworking.NBTDataPlayerScreenCaptureSequence, captureSequence);
+
+            WatutNetworking.instance().clientSendToServer(data);
+        } else {
+            int packetCount = Mth.ceil((float)sizeByteCount / (float)packetSizeLimit);
+
+            int packetBytesIndex = 0;
+
+            for (int i = 0; i < packetCount; i++) {
+                byte[] inputBytesPartial;
+                if (packetBytesIndex + packetSizeLimit < sizeByteCount) {
+                    inputBytesPartial = Arrays.copyOfRange(inputBytes, packetBytesIndex, packetBytesIndex + packetSizeLimit);
+                } else {
+                    inputBytesPartial = Arrays.copyOfRange(inputBytes, packetBytesIndex, sizeByteCount);
+                }
+                packetBytesIndex += inputBytesPartial.length;
+
+                //WE MUST USE NEW NBT FOR EACH PACKET OR WE ARE CHANGING THE ONE ALREADY ABOUT TO GET SEND AND THATS BREAKS THINGS - this cost me 5 hours of debugging
+                data = new CompoundTag();
+                data.putInt(WatutNetworking.NBTDataPlayerScreenCompressedPixelDataSize, texturePixelData.capacity());
                 data.putInt(WatutNetworking.NBTDataPlayerScreenWidth, ScreenParticleRenderer.getInstance().widthScaledDown);
                 data.putInt(WatutNetworking.NBTDataPlayerScreenHeight, ScreenParticleRenderer.getInstance().heightScaledDown);
-                data.putByteArray(WatutNetworking.NBTDataPlayerScreenCompressedPixelData, inputBytes);
 
-                data.putInt(WatutNetworking.NBTDataPlayerScreenCompressedPixelDataPacketCount, 1);
-                data.putInt(WatutNetworking.NBTDataPlayerScreenCompressedPixelDataPacketIndex, 1);
+                data.putByteArray(WatutNetworking.NBTDataPlayerScreenCompressedPixelData, inputBytesPartial);
 
+                data.putInt(WatutNetworking.NBTDataPlayerScreenCompressedPixelDataPacketCount, packetCount);
+                data.putInt(WatutNetworking.NBTDataPlayerScreenCompressedPixelDataPacketIndex, i);
+                data.putInt(WatutNetworking.NBTDataPlayerScreenCaptureSequence, captureSequence);
+
+                //CULog.dbg(Minecraft.getInstance().level.getGameTime() + " sending pixel packet");
                 WatutNetworking.instance().clientSendToServer(data);
-            } else {
-                int packetCount = Mth.ceil((float)sizeByteCount / (float)packetSizeLimit);
 
-                int packetBytesIndex = 0;
-
-                for (int i = 0; i < packetCount; i++) {
-                    byte[] inputBytesPartial;
-                    if (packetBytesIndex + packetSizeLimit < sizeByteCount) {
-                        inputBytesPartial = Arrays.copyOfRange(inputBytes, packetBytesIndex, packetBytesIndex + packetSizeLimit);
-                    } else {
-                        inputBytesPartial = Arrays.copyOfRange(inputBytes, packetBytesIndex, sizeByteCount);
-                    }
-                    packetBytesIndex += inputBytesPartial.length;
-
-                    //WE MUST USE NEW NBT FOR EACH PACKET OR WE ARE CHANGING THE ONE ALREADY ABOUT TO GET SEND AND THATS BREAKS THINGS - this cost me 5 hours of debugging
-                    data = new CompoundTag();
-                    data.putInt(WatutNetworking.NBTDataPlayerScreenCompressedPixelDataSize, status.getScreenData().getTexturePixelData().capacity());
-                    data.putInt(WatutNetworking.NBTDataPlayerScreenWidth, ScreenParticleRenderer.getInstance().widthScaledDown);
-                    data.putInt(WatutNetworking.NBTDataPlayerScreenHeight, ScreenParticleRenderer.getInstance().heightScaledDown);
-
-                    data.putByteArray(WatutNetworking.NBTDataPlayerScreenCompressedPixelData, inputBytesPartial);
-
-                    data.putInt(WatutNetworking.NBTDataPlayerScreenCompressedPixelDataPacketCount, packetCount);
-                    data.putInt(WatutNetworking.NBTDataPlayerScreenCompressedPixelDataPacketIndex, i);
-
-                    //CULog.dbg(Minecraft.getInstance().level.getGameTime() + " sending pixel packet");
-                    WatutNetworking.instance().clientSendToServer(data);
-
-                }
             }
-
-            status.getScreenData().getTexturePixelData().flip();
         }
+
+        texturePixelData.flip();
 
 
     }
@@ -1383,10 +1390,12 @@ public class PlayerStatusManagerClient extends PlayerStatusManager {
         //if (true) return;
 
         if (data.contains(WatutNetworking.NBTDataPlayerScreenCompressedPixelData)) {
+            ScreenData screenData = status.getScreenData();
             byte[] pixelData = data.getByteArray(WatutNetworking.NBTDataPlayerScreenCompressedPixelData).orElse(new byte[0]);
             int decompressedSize = data.getInt(WatutNetworking.NBTDataPlayerScreenCompressedPixelDataSize).orElse(0);
             int packetCount = data.getInt(WatutNetworking.NBTDataPlayerScreenCompressedPixelDataPacketCount).orElse(0);
             int packetIndex = data.getInt(WatutNetworking.NBTDataPlayerScreenCompressedPixelDataPacketIndex).orElse(0);
+            int captureSequence = data.getInt(WatutNetworking.NBTDataPlayerScreenCaptureSequence).orElse(0);
             status.getScreenData().setWidth(data.getInt(WatutNetworking.NBTDataPlayerScreenWidth).orElse(0));
             status.getScreenData().setHeight(data.getInt(WatutNetworking.NBTDataPlayerScreenHeight).orElse(0));
             long gameTime = Minecraft.getInstance().level != null ? Minecraft.getInstance().level.getGameTime() : 0;
@@ -1396,33 +1405,48 @@ public class PlayerStatusManagerClient extends PlayerStatusManager {
 
             if (packetCount > 1) {
                 if (packetIndex == 0) {
-                    status.getScreenData().setGameTicksSinceFirstPacket(gameTime);
-                    status.getScreenData().setLastIndexReceived(0);
-                    status.getScreenData().setTexturePixelDataPartial(pixelData);
+                    screenData.setCurrentReceiveCaptureSequence(captureSequence);
+                    if (captureSequence > 0 && captureSequence <= screenData.getLastAppliedCaptureSequence()) {
+                        // Ignore stale frame starts, but remember the sequence so following chunks are dropped too.
+                        screenData.setLastIndexReceived(-1);
+                        screenData.setTexturePixelDataPartial(null);
+                    } else {
+                        screenData.setGameTicksSinceFirstPacket(gameTime);
+                        screenData.setLastIndexReceived(0);
+                        screenData.setTexturePixelDataPartial(pixelData);
+                    }
                 } else {
-                    if (packetIndex != status.getScreenData().getLastIndexReceived() + 1) {
+                    if (captureSequence > 0 && captureSequence != screenData.getCurrentReceiveCaptureSequence()) {
+                        // Out-of-order/mismatched multipart sequence; ignore this chunk.
+                    } else if (screenData.getTexturePixelDataPartial() == null) {
+                        // Waiting for a stale/aborted multipart frame; ignore remaining chunks.
+                    } else if (packetIndex != screenData.getLastIndexReceived() + 1) {
                         CULog.dbg("ERROR: packet index incorrect, aborting packet processing");
                     } else {
-                        status.getScreenData().setLastIndexReceived(packetIndex);
-                        if (gameTime > status.getScreenData().getGameTicksSinceFirstPacket() + timeout) {
+                        screenData.setLastIndexReceived(packetIndex);
+                        if (gameTime > screenData.getGameTicksSinceFirstPacket() + timeout) {
                             //packet timeout waiting for other pieces, abort and reset state
                             //actually dont think i have to do anything, if a new packetIndex 0 comes in it forces a fresh set
                             //CULog.dbg("watut packet took too long to come in, stop waiting and reset");
                         } else {
                             if (pixelData.length > 0) {
-                                byte[] dataBytes = status.getScreenData().getTexturePixelDataPartial();
+                                byte[] dataBytes = screenData.getTexturePixelDataPartial();
                                 byte[] combined = new byte[dataBytes.length + pixelData.length];
                                 System.arraycopy(dataBytes, 0, combined, 0, dataBytes.length);
                                 System.arraycopy(pixelData, 0, combined, dataBytes.length, pixelData.length);
-                                status.getScreenData().setTexturePixelDataPartial(combined);
+                                screenData.setTexturePixelDataPartial(combined);
 
                                 if (packetIndex == packetCount-1) {
                                     try {
-                                        if (status.getScreenData().getTexturePixelDataPartial() != null) {
+                                        if (screenData.getTexturePixelDataPartial() != null) {
                                             //CULog.dbg(gameTime + " updating pixel data");
-                                            status.getScreenData().setTexturePixelData(RenderHelper.decompress(status.getScreenData(), ByteBuffer.wrap(status.getScreenData().getTexturePixelDataPartial()), decompressedSize));
-                                            status.getScreenData().markNeedsNewRenderFromPixelData(true);
-                                            status.getScreenData().getIsBufferReady().set(true);
+                                            screenData.setTexturePixelData(RenderHelper.decompress(screenData, ByteBuffer.wrap(screenData.getTexturePixelDataPartial()), decompressedSize));
+                                            screenData.markNeedsNewRenderFromPixelData(true);
+                                            screenData.getIsBufferReady().set(true);
+                                            if (captureSequence > 0) {
+                                                screenData.setLastAppliedCaptureSequence(captureSequence);
+                                            }
+                                            screenData.setCurrentReceiveCaptureSequence(-1);
                                         } else {
                                             CULog.dbg("getTexturePixelDataPartial() null!");
                                         }
@@ -1437,10 +1461,16 @@ public class PlayerStatusManagerClient extends PlayerStatusManager {
 
                 }
             } else {
+                if (captureSequence > 0 && captureSequence <= screenData.getLastAppliedCaptureSequence()) {
+                    return;
+                }
                 try {
-                    status.getScreenData().setTexturePixelData(RenderHelper.decompress(status.getScreenData(), ByteBuffer.wrap(pixelData), decompressedSize));
-                    status.getScreenData().markNeedsNewRenderFromPixelData(true);
-                    status.getScreenData().getIsBufferReady().set(true);
+                    screenData.setTexturePixelData(RenderHelper.decompress(screenData, ByteBuffer.wrap(pixelData), decompressedSize));
+                    screenData.markNeedsNewRenderFromPixelData(true);
+                    screenData.getIsBufferReady().set(true);
+                    if (captureSequence > 0) {
+                        screenData.setLastAppliedCaptureSequence(captureSequence);
+                    }
                 } catch (Exception e) {
                     e.printStackTrace();
                 }

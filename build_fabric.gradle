@@ -1,5 +1,5 @@
 plugins {
-    id 'fabric-loom' version '1.11-SNAPSHOT'
+    id 'fabric-loom' version '1.13.3'
     id 'maven-publish'
     id "com.hypherionmc.modutils.modpublisher" version "2.1.6"
 }
@@ -63,7 +63,7 @@ dependencies {
     //include(modImplementation("ForgeConfigAPIPort:ForgeConfigAPIPort:v8.0.0-1.20.1-Fabric"))
     //using https://www.curseforge.com/minecraft/mc-mods/forge-config-api-port-fabric/files/4583000
     //include(modImplementation("curse.maven:forge-config-api-port-fabric-547434:7213620"))
-    include(modImplementation("maven.modrinth:forge-config-api-port:21.10.1-fabric,1.21.10"))
+    include(modImplementation("maven.modrinth:forge-config-api-port:21.11.1-fabric,1.21.11"))
     implementation 'com.electronwill.night-config:core:3.7.3'
     implementation 'com.electronwill.night-config:toml:3.7.3'
     //include(modImplementation("fuzs.forgeconfigapiport:forgeconfigapiport-fabric:v8.0.0-1.20.1-Fabric"))

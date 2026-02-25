@@ -1,16 +1,9 @@
 package com.corosus.watut;
 
-import com.corosus.watut.client.screen.RenderHelper;
-import com.mojang.blaze3d.systems.RenderSystem;
-import com.mojang.blaze3d.vertex.DefaultVertexFormat;
-import com.mojang.blaze3d.vertex.VertexFormat;
-import net.minecraft.Util;
+import net.minecraft.util.Util;
 import net.minecraft.client.particle.ParticleRenderType;
-import net.minecraft.client.renderer.RenderStateShard;
-import net.minecraft.client.renderer.RenderType;
+import net.minecraft.client.renderer.rendertype.RenderType;
 import net.minecraft.client.renderer.texture.TextureAtlas;
-import net.minecraft.resources.ResourceLocation;
-import net.minecraft.util.TriState;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -108,8 +101,6 @@ public class ParticleRegistry {
     });*/
 
     static {
-
-        ResourceLocation test = ResourceLocation.parse("test");
 
         /**
          * setTransparencyState

@@ -20,7 +20,7 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.render.state.GuiRenderState;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.renderer.texture.DynamicTexture;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import org.lwjgl.system.MemoryUtil;
 
 import java.io.ByteArrayInputStream;
@@ -29,6 +29,8 @@ import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.nio.ByteBuffer;
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.zip.Deflater;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
@@ -43,7 +45,9 @@ public class RenderHelper {
     public static boolean pendingCapture = false;
     public static boolean pendingGuiOnlyCapturePrepared = false;
     private static GuiRenderState pendingScreenOnlyCaptureRenderState = null;
-    public static ResourceLocation cursor = ResourceLocation.fromNamespaceAndPath(WatutMod.MODID, "textures/misc/mouse.png");
+    private static int nextLocalCaptureSequence = 1;
+    private static final Deque<CompressedFrameMeta> pendingCompressedFrameMetaQueue = new ArrayDeque<>();
+    public static final Identifier cursor = Identifier.fromNamespaceAndPath(WatutMod.MODID, "textures/misc/mouse.png");
 
     // Xaero World Map detection (used to disable blur while the map GUI is open).
     public static Class guiMap;
@@ -133,6 +137,35 @@ public class RenderHelper {
 
         return processed;
     });
+
+    private static int allocateCaptureSequence() {
+        int seq = nextLocalCaptureSequence++;
+        if (seq <= 0) {
+            nextLocalCaptureSequence = 1;
+            seq = nextLocalCaptureSequence++;
+        }
+        return seq;
+    }
+
+    private static synchronized void enqueueCompressedFrameMeta(CompressedFrameMeta meta) {
+        pendingCompressedFrameMetaQueue.addLast(meta);
+    }
+
+    private static synchronized CompressedFrameMeta pollCompressedFrameMeta() {
+        return pendingCompressedFrameMetaQueue.pollFirst();
+    }
+
+    private static final class CompressedFrameMeta {
+        private final int captureSequence;
+        private final Screen sourceScreen;
+        private final PlayerStatus.PlayerGuiState sourceGuiState;
+
+        private CompressedFrameMeta(int captureSequence, Screen sourceScreen, PlayerStatus.PlayerGuiState sourceGuiState) {
+            this.captureSequence = captureSequence;
+            this.sourceScreen = sourceScreen;
+            this.sourceGuiState = sourceGuiState;
+        }
+    }
 
     /*public static int encodeIndex(int index, byte[] encodedBytes) {
         int position = 0; // Keep track of the number of bytes written
@@ -239,16 +272,34 @@ public class RenderHelper {
 
         PlayerStatus playerStatusLocal = WatutMod.getPlayerStatusManagerClient().getStatusLocal();
 
-        if (processor.hasProcessedBuffers()) {
-            try {
-                ByteBuffer result = processor.getProcessedBuffer();
-                if (result != null) {
+        ByteBuffer result = processor.pollProcessedBuffer();
+        if (result != null) {
+            CompressedFrameMeta meta = pollCompressedFrameMeta();
+            // If compression lagged behind, prefer the newest finished frame and drop older stale outputs.
+            ByteBuffer next;
+            while ((next = processor.pollProcessedBuffer()) != null) {
+                result = next;
+                CompressedFrameMeta nextMeta = pollCompressedFrameMeta();
+                if (nextMeta != null) {
+                    meta = nextMeta;
+                }
+            }
+            if (meta == null) {
+                // Metadata queue got out of sync (unexpected). Request a fresh capture instead of sending unknown data.
+                playerStatusLocal.getScreenData().setNeedsNewRenderToPixelData(true);
+            } else {
+                Minecraft mc = Minecraft.getInstance();
+                boolean screenChangedSinceCapture = mc.screen != meta.sourceScreen
+                        || playerStatusLocal.getPlayerGuiState() != meta.sourceGuiState;
+                if (screenChangedSinceCapture) {
+                // Drop stale compressed frames if the local screen changed before compression finished.
+                    playerStatusLocal.getScreenData().setNeedsNewRenderToPixelData(true);
+                } else {
                     ScreenData screenDataLocal = playerStatusLocal.getScreenData();
+                    screenDataLocal.setTexturePixelDataCaptureSequence(meta.captureSequence);
                     screenDataLocal.setTexturePixelData(result);
                     WatutMod.getPlayerStatusManagerClient().sendScreenRenderData(playerStatusLocal);
                 }
-            } catch (InterruptedException e) {
-                throw new RuntimeException(e);
             }
         }
 
@@ -257,29 +308,31 @@ public class RenderHelper {
 
 
         if (needsScreenUpdate && !processor.hasWork()) {
-            playerStatusLocal.getScreenData().setNeedsNewRenderToPixelData(false);
             ScreenParticleRenderer.getInstance().checkSetup();
             // In 1.21.6+, Screen.renderWithTooltip*() no longer does GPU work (two-phase rendering).
             // Build a screen-only GuiRenderState by re-running Screen.renderWithTooltipAndSubtitles()
             // into an isolated
             // GuiGraphics (CPU-side draw-list generation only). GuiRendererCaptureMixin will render that
             // isolated state to WATUT's offscreen target later in the same frame when fog/uniform buffers exist.
-            prepareScreenOnlyCaptureRenderState(pMouseX, pMouseY, pPartialTick);
-            pendingGuiOnlyCapturePrepared = false;
-            pendingCapture = true;
+            boolean prepared = prepareScreenOnlyCaptureRenderState(pMouseX, pMouseY, pPartialTick);
+            if (prepared) {
+                playerStatusLocal.getScreenData().setNeedsNewRenderToPixelData(false);
+                pendingGuiOnlyCapturePrepared = false;
+                pendingCapture = true;
+            }
         }
     }
 
-    private static void prepareScreenOnlyCaptureRenderState(int pMouseX, int pMouseY, float pPartialTick) {
+    private static boolean prepareScreenOnlyCaptureRenderState(int pMouseX, int pMouseY, float pPartialTick) {
         pendingScreenOnlyCaptureRenderState = null;
         xaeroGuiMapCaptureActive = false;
 
         Minecraft mc = Minecraft.getInstance();
         Screen screen = mc.screen;
-        if (screen == null) return;
+        if (screen == null) return false;
 
         GuiRenderState captureState = new GuiRenderState();
-        GuiGraphics captureGraphics = new GuiGraphics(mc, captureState);
+        GuiGraphics captureGraphics = new GuiGraphics(mc, captureState, pMouseX, pMouseY);
 
         try {
             if (ConfigServerControlledSyncedToClient.dynamicGuiDisableBackgroundRendering) {
@@ -290,12 +343,14 @@ public class RenderHelper {
 
             screen.renderWithTooltipAndSubtitles(captureGraphics, pMouseX, pMouseY, pPartialTick);
             pendingScreenOnlyCaptureRenderState = captureState;
+            return pendingScreenOnlyCaptureRenderState != null || xaeroGuiMapCaptureActive;
         } catch (Throwable t) {
             pendingScreenOnlyCaptureRenderState = null;
             if (!loggedGuiCapturePrepareFailure) {
                 loggedGuiCapturePrepareFailure = true;
                 LOGGER.error("WATUT GUI-only capture state preparation failed (logging once)", t);
             }
+            return false;
         } finally {
             performingOwnRender = false;
             ScreenParticleRenderer.isRenderingParticleGUI = false;
@@ -385,6 +440,13 @@ public class RenderHelper {
             getPixelDataFromFrameBufferAsync((pixelBuffer) -> {
                 boolean useThread = true;
                 if (useThread) {
+                    Minecraft mc = Minecraft.getInstance();
+                    PlayerStatus playerStatusLocal = WatutMod.getPlayerStatusManagerClient().getStatusLocal();
+                    enqueueCompressedFrameMeta(new CompressedFrameMeta(
+                            allocateCaptureSequence(),
+                            mc.screen,
+                            playerStatusLocal.getPlayerGuiState()
+                    ));
                     processor.submitForProcessing(pixelBuffer);
                 } else {
                     PlayerStatus playerStatusLocal = WatutMod.getPlayerStatusManagerClient().getStatusLocal();

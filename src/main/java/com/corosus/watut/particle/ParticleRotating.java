@@ -11,8 +11,10 @@ import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.particle.ParticleRenderType;
 import net.minecraft.client.particle.SingleQuadParticle;
 import net.minecraft.client.renderer.RenderPipelines;
-import net.minecraft.client.renderer.RenderStateShard;
-import net.minecraft.client.renderer.RenderType;
+import net.minecraft.client.renderer.rendertype.OutputTarget;
+import net.minecraft.client.renderer.rendertype.RenderSetup;
+import net.minecraft.client.renderer.rendertype.RenderType;
+import net.minecraft.client.renderer.rendertype.RenderTypes;
 import net.minecraft.client.renderer.texture.TextureAtlas;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
 import net.minecraft.util.Mth;
@@ -56,7 +58,7 @@ public abstract class ParticleRotating extends SingleQuadParticle {
         @Override
         public RenderType getRenderType() {
             // Fallback path kept for compatibility; this render type is not the primary path in WATUT.
-            return RenderType.entityTranslucent(TextureAtlas.LOCATION_PARTICLES);
+            return RenderTypes.entityTranslucent(TextureAtlas.LOCATION_PARTICLES);
         }
 
         @Override
@@ -71,13 +73,12 @@ public abstract class ParticleRotating extends SingleQuadParticle {
 
     private static final RenderType TRANSLUCENT_PARTICLE_NO_CULL_RENDER_TYPE = RenderType.create(
             "watut_translucent_particle_no_cull_particles",
-            1536,
-            TRANSLUCENT_PARTICLE_NO_CULL_PIPELINE,
-            RenderType.CompositeState.builder()
-                    .setTextureState(new RenderStateShard.TextureStateShard(TextureAtlas.LOCATION_PARTICLES, false))
-                    .setOutputState(RenderStateShard.MAIN_TARGET)
-                    .setLightmapState(RenderStateShard.LIGHTMAP)
-                    .createCompositeState(false));
+            RenderSetup.builder(TRANSLUCENT_PARTICLE_NO_CULL_PIPELINE)
+                    .bufferSize(1536)
+                    .withTexture("Sampler0", TextureAtlas.LOCATION_PARTICLES)
+                    .setOutputTarget(OutputTarget.MAIN_TARGET)
+                    .useLightmap()
+                    .createRenderSetup());
 
     public static ParticleRenderTypeOld PARTICLE_SHEET_TRANSLUCENT_NO_FACE_CULL = new ParticleRenderTypeOld() {
         @Override
@@ -92,13 +93,12 @@ public abstract class ParticleRotating extends SingleQuadParticle {
 
     private static final RenderType TERRAIN_TRANSLUCENT_NO_CULL_RENDER_TYPE = RenderType.create(
             "watut_translucent_particle_no_cull_terrain",
-            1536,
-            TRANSLUCENT_PARTICLE_NO_CULL_NO_DEPTH_PIPELINE,
-            RenderType.CompositeState.builder()
-                    .setTextureState(new RenderStateShard.TextureStateShard(TextureAtlas.LOCATION_BLOCKS, false))
-                    .setOutputState(RenderStateShard.MAIN_TARGET)
-                    .setLightmapState(RenderStateShard.LIGHTMAP)
-                    .createCompositeState(false));
+            RenderSetup.builder(TRANSLUCENT_PARTICLE_NO_CULL_NO_DEPTH_PIPELINE)
+                    .bufferSize(1536)
+                    .withTexture("Sampler0", TextureAtlas.LOCATION_BLOCKS)
+                    .setOutputTarget(OutputTarget.MAIN_TARGET)
+                    .useLightmap()
+                    .createRenderSetup());
 
     public static ParticleRenderTypeOld TERRAIN_SHEET_TRANSLUCENT_NO_FACE_CULL = new ParticleRenderTypeOld() {
         @Override
@@ -166,7 +166,7 @@ public abstract class ParticleRotating extends SingleQuadParticle {
     }
 
     public void render(VertexConsumer pBuffer, Camera pRenderInfo, float pPartialTicks) {
-        Vec3 vec3 = pRenderInfo.getPosition();
+        Vec3 vec3 = pRenderInfo.position();
         float f = (float)(Mth.lerp(pPartialTicks, this.xo, this.x) - vec3.x());
         float f1 = (float)(Mth.lerp(pPartialTicks, this.yo, this.y) - vec3.y());
         float f2 = (float)(Mth.lerp(pPartialTicks, this.zo, this.z) - vec3.z());

@@ -3,7 +3,7 @@ package com.corosus.watut;
 import com.mojang.blaze3d.pipeline.RenderPipeline;
 import com.mojang.blaze3d.shaders.UniformType;
 import net.minecraft.client.renderer.RenderPipelines;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 
 public class ShaderProgramBlur {
 
@@ -14,9 +14,9 @@ public class ShaderProgramBlur {
 
     public ShaderProgramBlur(String resourcePath) {
 
-        ResourceLocation shaderLoc = ResourceLocation.fromNamespaceAndPath(WatutMod.MODID, resourcePath);
+        Identifier shaderLoc = Identifier.fromNamespaceAndPath(WatutMod.MODID, resourcePath);
         pipeline = RenderPipelines.register(RenderPipeline.builder(RenderPipelines.POST_PROCESSING_SNIPPET)
-                .withLocation(ResourceLocation.fromNamespaceAndPath(WatutMod.MODID, "pipeline/" + resourcePath.replace("/", "_")))
+                .withLocation(Identifier.fromNamespaceAndPath(WatutMod.MODID, "pipeline/" + resourcePath.replace("/", "_")))
                 .withVertexShader(shaderLoc)
                 .withFragmentShader(shaderLoc)
                 .withSampler("InSampler")

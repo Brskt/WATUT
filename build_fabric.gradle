@@ -75,9 +75,8 @@ dependencies {
     // We only need this for 26.x snapshots and keep it compileOnly so runtime/remap behavior stays with Loom.
     if (project.minecraft_version.startsWith("26.")) {
         def loomClientJar = new File(gradle.gradleUserHomeDir, "caches/fabric-loom/${project.minecraft_version}/minecraft-client.jar")
-        if (loomClientJar.exists()) {
-            compileOnly files(loomClientJar)
-        }
+        // Do not gate this on exists() at configuration time; CI may start with an empty Loom cache.
+        compileOnly files(loomClientJar)
     }
 }
 

@@ -1,7 +1,6 @@
 package com.corosus.watut.client;
 
 import com.corosus.watut.particle.ParticleRotating;
-import com.corosus.watut.client.screen.RenderHelper;
 import com.google.common.collect.*;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.*;

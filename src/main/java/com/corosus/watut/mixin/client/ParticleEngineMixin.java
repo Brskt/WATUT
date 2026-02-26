@@ -26,10 +26,6 @@ public abstract class ParticleEngineMixin {
         return false;
     }
 
-    @Inject(method = "addParticlesPass", at = @At("HEAD"))
-    private void watut$diagAddParticlesPassHead(CallbackInfo ci) {
-    }
-
     @Redirect(
             method = "addParticlesPass",
             at = @At(
@@ -44,10 +40,6 @@ public abstract class ParticleEngineMixin {
             vanillaParticlesPassRenderer.run();
             watut$renderCustomParticles();
         });
-    }
-
-    @Inject(method = "addMainPass", at = @At("HEAD"), require = 0)
-    private void watut$diagAddMainPassHead(CallbackInfo ci) {
     }
 
     @Redirect(
